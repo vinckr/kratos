@@ -14,7 +14,7 @@ replace github.com/gobuffalo/pop/v5 => github.com/gobuffalo/pop/v5 v5.3.4-0.2021
 
 replace github.com/mattn/go-sqlite3 => github.com/mattn/go-sqlite3 v1.14.7-0.20210414154423-1157a4212dcb
 
-replace github.com/ory/x => github.com/ory/x v0.0.272
+replace github.com/ory/x => github.com/ory/x v0.0.276
 
 replace github.com/oleiade/reflections => github.com/oleiade/reflections v1.0.1
 
@@ -74,7 +74,7 @@ require (
 	github.com/ory/kratos-client-go v0.6.3-alpha.1
 	github.com/ory/mail/v3 v3.0.0
 	github.com/ory/nosurf v1.2.5
-	github.com/ory/x v0.0.272
+	github.com/ory/x v0.0.276
 	github.com/phayes/freeport v0.0.0-20180830031419-95f893ade6f2
 	github.com/philhofer/fwd v1.1.1 // indirect
 	github.com/pkg/errors v0.9.1
