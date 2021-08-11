@@ -1021,7 +1021,7 @@
                 "enabled": {
                   "type": "boolean",
                   "title": "Enables the TOTP method",
-                  "default": true
+                  "default": false
                 },
                 "config": {
                   "type": "object",
