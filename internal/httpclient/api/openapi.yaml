@@ -549,6 +549,20 @@ paths:
         schema:
           type: boolean
         style: form
+      - description: |-
+          Request a Specific AuthenticationMethod Assurance Level
+
+          Use this parameter to upgrade an existing session's authenticator assurance level (AAL). This
+          allows you to ask for multi-factor authentication. When an identity sign in using e.g. username+password,
+          the AAL is 1. If you wish to "upgrade" the session's security by asking the user to perform TOTP / WebAuth/ ...
+          you would set this to "aal2".
+        explode: true
+        in: query
+        name: aal
+        required: false
+        schema:
+          type: string
+        style: form
       responses:
         "200":
           content:
@@ -601,6 +615,20 @@ paths:
         required: false
         schema:
           type: boolean
+        style: form
+      - description: |-
+          Request a Specific AuthenticationMethod Assurance Level
+
+          Use this parameter to upgrade an existing session's authenticator assurance level (AAL). This
+          allows you to ask for multi-factor authentication. When an identity sign in using e.g. username+password,
+          the AAL is 1. If you wish to "upgrade" the session's security by asking the user to perform TOTP / WebAuth/ ...
+          you would set this to "aal2".
+        explode: true
+        in: query
+        name: aal
+        required: false
+        schema:
+          type: string
         style: form
       responses:
         "200":
@@ -2036,11 +2064,6 @@ components:
           description: Details of an error
           type: string
       type: object
-    CredentialsType:
-      description: and so on.
-      title: CredentialsType  represents several different credential types, like
-        password credentials, passwordless credentials,
-      type: string
     ErrorResponse:
       properties:
         message:
@@ -2644,6 +2667,17 @@ components:
       required:
       - identity_id
       type: object
+    authenticatorAssuranceLevel:
+      description: |-
+        The authenticator assurance level can be one of "aal1", "aal2", or "aal3". A higher number means that it is harder
+        for an attacker to compromise the account.
+
+        Generally, "aal1" implies that one authentication factor was used while AAL2 implies that two factors (e.g.
+        password + TOTP) have been used.
+
+        To learn more about these levels please head over to: https://www.ory.sh/kratos/docs/concepts/credentials
+      title: Authenticator Assurance Level (AAL)
+      type: string
     genericError:
       properties:
         code:
@@ -2848,6 +2882,11 @@ components:
           format: date-time
           type: string
       type: object
+    identityCredentialsType:
+      description: and so on.
+      title: CredentialsType  represents several different credential types, like
+        password credentials, passwordless credentials,
+      type: string
     identityList:
       items:
         $ref: '#/components/schemas/identity'
@@ -2977,6 +3016,7 @@ components:
             type: type
         updated_at: 2000-01-23T04:56:07.000+00:00
         forced: true
+        requested_aal: requested_aal
         active: active
         created_at: 2000-01-23T04:56:07.000+00:00
         id: id
@@ -3000,7 +3040,7 @@ components:
           format: date-time
           type: string
         forced:
-          description: Forced stores whether this login flow should enforce re-authentication.
+          description: Refresh stores whether this login flow should enforce re-authentication.
           type: boolean
         id:
           format: uuid4
@@ -3013,6 +3053,17 @@ components:
           description: |-
             RequestURL is the initial URL that was requested from Ory Kratos. It can be used
             to forward information contained in the URL's path or query for example.
+          type: string
+        requested_aal:
+          description: |-
+            The authenticator assurance level can be one of "aal1", "aal2", or "aal3". A higher number means that it is harder
+            for an attacker to compromise the account.
+
+            Generally, "aal1" implies that one authentication factor was used while AAL2 implies that two factors (e.g.
+            password + TOTP) have been used.
+
+            To learn more about these levels please head over to: https://www.ory.sh/kratos/docs/concepts/credentials
+          title: Authenticator Assurance Level (AAL)
           type: string
         type:
           description: The flow type can either be `api` or `browser`.
@@ -3546,6 +3597,12 @@ components:
       description: A Session
       example:
         expires_at: 2000-01-23T04:56:07.000+00:00
+        authentication_methods:
+        - completed_at: 2000-01-23T04:56:07.000+00:00
+          method: method
+        - completed_at: 2000-01-23T04:56:07.000+00:00
+          method: method
+        authenticator_assurance_level: authenticator_assurance_level
         identity:
           recovery_addresses:
           - updated_at: 2000-01-23T04:56:07.000+00:00
@@ -3597,14 +3654,33 @@ components:
         issued_at: 2000-01-23T04:56:07.000+00:00
       properties:
         active:
-          description: Whether or not the session is active.
+          description: Active state. If false the session is no longer active.
           type: boolean
         authenticated_at:
           description: |-
             The Session Authentication Timestamp
 
-            When this session was authenticated at.
+            When this session was authenticated at. If multi-factor authentication was used this
+            is the time when the last factor was authenticated (e.g. the TOTP code challenge was completed).
           format: date-time
+          type: string
+        authentication_methods:
+          description: A list of authenticators which were used to authenticate the
+            session.
+          items:
+            $ref: '#/components/schemas/sessionAuthenticationMethod'
+          title: List of (Used) AuthenticationMethods
+          type: array
+        authenticator_assurance_level:
+          description: |-
+            The authenticator assurance level can be one of "aal1", "aal2", or "aal3". A higher number means that it is harder
+            for an attacker to compromise the account.
+
+            Generally, "aal1" implies that one authentication factor was used while AAL2 implies that two factors (e.g.
+            password + TOTP) have been used.
+
+            To learn more about these levels please head over to: https://www.ory.sh/kratos/docs/concepts/credentials
+          title: Authenticator Assurance Level (AAL)
           type: string
         expires_at:
           description: |-
@@ -3622,12 +3698,41 @@ components:
           description: |-
             The Session Issuance Timestamp
 
-            When this session was authenticated at.
+            When this session was issued at. Usually equal or close to `authenticated_at`.
           format: date-time
           type: string
       required:
       - id
       - identity
+      type: object
+    sessionAuthenticationMethod:
+      description: A singular authenticator used during authentication / login.
+      example:
+        completed_at: 2000-01-23T04:56:07.000+00:00
+        method: method
+      properties:
+        completed_at:
+          description: When the authentication challenge was completed.
+          format: date-time
+          type: string
+        method:
+          description: and so on.
+          title: CredentialsType  represents several different credential types, like
+            password credentials, passwordless credentials,
+          type: string
+      title: AuthenticationMethod identifies an authentication method
+      type: object
+    sessionAuthenticationMethods:
+      description: A list of authenticators which were used to authenticate the session.
+      items:
+        $ref: '#/components/schemas/sessionAuthenticationMethod'
+      title: List of (Used) AuthenticationMethods
+      type: array
+    sessionDevice:
+      properties:
+        user_agent:
+          description: UserAgent of this device
+          type: string
       type: object
     settingsProfileFormConfig:
       properties:
@@ -3706,6 +3811,25 @@ components:
       - password_identifier
       title: submitSelfServiceLoginFlowWithPasswordMethodBody is used to decode the
         login form payload.
+      type: object
+    submitSelfServiceLoginFlowWithTOTPMethodBody:
+      properties:
+        csrf_token:
+          description: Sending the anti-csrf token is only required for browser login
+            flows.
+          type: string
+        method:
+          description: Method should be set to "totp" when logging in using the TOTP
+            strategy.
+          type: string
+        totp_code:
+          description: The TOTP code.
+          type: string
+      required:
+      - method
+      - totp_code
+      title: submitSelfServiceLoginFlowWithTOTPMethodBody is used to decode the login
+        form payload.
       type: object
     submitSelfServiceLogoutFlowWithoutBrowserBody:
       description: nolint:deadcode,unused
@@ -3898,6 +4022,29 @@ components:
       - method
       - traits
       type: object
+    submitSelfServiceSettingsFlowWithTOTPMethodBody:
+      properties:
+        csrf_token:
+          description: CSRFToken is the anti-CSRF token
+          type: string
+        method:
+          description: |-
+            Method
+
+            Should be set to "totp" when trying to add, update, or remove a totp pairing.
+          type: string
+        unlink_totp:
+          description: |-
+            UnlinkTOTP if true will remove the TOTP pairing,
+            effectively removing the credential. This can be used
+            to set up a new TOTP device.
+          type: boolean
+        verification_totp:
+          description: ValidationTOTP must contain a valid TOTP based on the
+          type: string
+      required:
+      - method
+      type: object
     submitSelfServiceVerificationFlowBody:
       description: nolint:deadcode,unused
       discriminator:
@@ -3937,6 +4084,12 @@ components:
         session_token: session_token
         session:
           expires_at: 2000-01-23T04:56:07.000+00:00
+          authentication_methods:
+          - completed_at: 2000-01-23T04:56:07.000+00:00
+            method: method
+          - completed_at: 2000-01-23T04:56:07.000+00:00
+            method: method
+          authenticator_assurance_level: authenticator_assurance_level
           identity:
             recovery_addresses:
             - updated_at: 2000-01-23T04:56:07.000+00:00
@@ -4054,6 +4207,12 @@ components:
           id: id
         session:
           expires_at: 2000-01-23T04:56:07.000+00:00
+          authentication_methods:
+          - completed_at: 2000-01-23T04:56:07.000+00:00
+            method: method
+          - completed_at: 2000-01-23T04:56:07.000+00:00
+            method: method
+          authenticator_assurance_level: authenticator_assurance_level
           identity:
             recovery_addresses:
             - updated_at: 2000-01-23T04:56:07.000+00:00
@@ -4402,10 +4561,14 @@ components:
 
             format: uri
           type: string
+        id:
+          description: A unique identifier
+          type: string
         title:
           $ref: '#/components/schemas/uiText'
       required:
       - href
+      - id
       - title
       title: AnchorAttributes represents the attributes of an anchor node.
       type: object
@@ -4420,6 +4583,9 @@ components:
       type: string
     uiNodeImageAttributes:
       properties:
+        id:
+          description: A unique identifier
+          type: string
         src:
           description: |-
             The image's source URL.
@@ -4427,6 +4593,7 @@ components:
             format: uri
           type: string
       required:
+      - id
       - src
       title: ImageAttributes represents the attributes of an image node.
       type: object
@@ -4461,9 +4628,13 @@ components:
       type: object
     uiNodeTextAttributes:
       properties:
+        id:
+          description: A unique identifier
+          type: string
         text:
           $ref: '#/components/schemas/uiText'
       required:
+      - id
       - text
       title: TextAttributes represents the attributes of a text node.
       type: object

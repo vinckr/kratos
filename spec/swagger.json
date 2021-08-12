@@ -611,6 +611,12 @@
             "description": "Refresh a login session\n\nIf set to true, this will refresh an existing login session by\nasking the user to sign in again. This will reset the\nauthenticated_at time of the session.",
             "name": "refresh",
             "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Request a Specific AuthenticationMethod Assurance Level\n\nUse this parameter to upgrade an existing session's authenticator assurance level (AAL). This\nallows you to ask for multi-factor authentication. When an identity sign in using e.g. username+password,\nthe AAL is 1. If you wish to \"upgrade\" the session's security by asking the user to perform TOTP / WebAuth/ ...\nyou would set this to \"aal2\".",
+            "name": "aal",
+            "in": "query"
           }
         ],
         "responses": {
@@ -655,6 +661,12 @@
             "type": "boolean",
             "description": "Refresh a login session\n\nIf set to true, this will refresh an existing login session by\nasking the user to sign in again. This will reset the\nauthenticated_at time of the session.",
             "name": "refresh",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "Request a Specific AuthenticationMethod Assurance Level\n\nUse this parameter to upgrade an existing session's authenticator assurance level (AAL). This\nallows you to ask for multi-factor authentication. When an identity sign in using e.g. username+password,\nthe AAL is 1. If you wish to \"upgrade\" the session's security by asking the user to perform TOTP / WebAuth/ ...\nyou would set this to \"aal2\".",
+            "name": "aal",
             "in": "query"
           }
         ],
@@ -1911,11 +1923,6 @@
         }
       }
     },
-    "CredentialsType": {
-      "description": "and so on.",
-      "type": "string",
-      "title": "CredentialsType  represents several different credential types, like password credentials, passwordless credentials,"
-    },
     "ErrorResponse": {
       "type": "object",
       "title": "ErrorResponse Represents an error.",
@@ -2676,6 +2683,11 @@
         }
       }
     },
+    "authenticatorAssuranceLevel": {
+      "description": "The authenticator assurance level can be one of \"aal1\", \"aal2\", or \"aal3\". A higher number means that it is harder\nfor an attacker to compromise the account.\n\nGenerally, \"aal1\" implies that one authentication factor was used while AAL2 implies that two factors (e.g.\npassword + TOTP) have been used.\n\nTo learn more about these levels please head over to: https://www.ory.sh/kratos/docs/concepts/credentials",
+      "type": "string",
+      "title": "Authenticator Assurance Level (AAL)"
+    },
     "genericError": {
       "type": "object",
       "required": [
@@ -2827,7 +2839,7 @@
           }
         },
         "type": {
-          "$ref": "#/definitions/CredentialsType"
+          "$ref": "#/definitions/identityCredentialsType"
         },
         "updated_at": {
           "description": "UpdatedAt is a helper struct field for gobuffalo.pop.",
@@ -2835,6 +2847,11 @@
           "format": "date-time"
         }
       }
+    },
+    "identityCredentialsType": {
+      "description": "and so on.",
+      "type": "string",
+      "title": "CredentialsType  represents several different credential types, like password credentials, passwordless credentials,"
     },
     "identityList": {
       "type": "array",
@@ -2930,7 +2947,7 @@
       ],
       "properties": {
         "active": {
-          "$ref": "#/definitions/CredentialsType"
+          "$ref": "#/definitions/identityCredentialsType"
         },
         "created_at": {
           "description": "CreatedAt is a helper struct field for gobuffalo.pop.",
@@ -2943,7 +2960,7 @@
           "format": "date-time"
         },
         "forced": {
-          "description": "Forced stores whether this login flow should enforce re-authentication.",
+          "description": "Refresh stores whether this login flow should enforce re-authentication.",
           "type": "boolean"
         },
         "id": {
@@ -2957,6 +2974,9 @@
         "request_url": {
           "description": "RequestURL is the initial URL that was requested from Ory Kratos. It can be used\nto forward information contained in the URL's path or query for example.",
           "type": "string"
+        },
+        "requested_aal": {
+          "$ref": "#/definitions/authenticatorAssuranceLevel"
         },
         "type": {
           "$ref": "#/definitions/selfServiceFlowType"
@@ -3058,7 +3078,7 @@
       ],
       "properties": {
         "active": {
-          "$ref": "#/definitions/CredentialsType"
+          "$ref": "#/definitions/identityCredentialsType"
         },
         "expires_at": {
           "description": "ExpiresAt is the time (UTC) when the flow expires. If the user still wishes to log in,\na new flow has to be initiated.",
@@ -3196,13 +3216,19 @@
       ],
       "properties": {
         "active": {
-          "description": "Whether or not the session is active.",
+          "description": "Active state. If false the session is no longer active.",
           "type": "boolean"
         },
         "authenticated_at": {
-          "description": "The Session Authentication Timestamp\n\nWhen this session was authenticated at.",
+          "description": "The Session Authentication Timestamp\n\nWhen this session was authenticated at. If multi-factor authentication was used this\nis the time when the last factor was authenticated (e.g. the TOTP code challenge was completed).",
           "type": "string",
           "format": "date-time"
+        },
+        "authentication_methods": {
+          "$ref": "#/definitions/sessionAuthenticationMethods"
+        },
+        "authenticator_assurance_level": {
+          "$ref": "#/definitions/authenticatorAssuranceLevel"
         },
         "expires_at": {
           "description": "The Session Expiry\n\nWhen this session expires at.",
@@ -3216,9 +3242,41 @@
           "$ref": "#/definitions/identity"
         },
         "issued_at": {
-          "description": "The Session Issuance Timestamp\n\nWhen this session was authenticated at.",
+          "description": "The Session Issuance Timestamp\n\nWhen this session was issued at. Usually equal or close to `authenticated_at`.",
           "type": "string",
           "format": "date-time"
+        }
+      }
+    },
+    "sessionAuthenticationMethod": {
+      "description": "A singular authenticator used during authentication / login.",
+      "type": "object",
+      "title": "AuthenticationMethod identifies an authentication method",
+      "properties": {
+        "completed_at": {
+          "description": "When the authentication challenge was completed.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "method": {
+          "$ref": "#/definitions/identityCredentialsType"
+        }
+      }
+    },
+    "sessionAuthenticationMethods": {
+      "description": "A list of authenticators which were used to authenticate the session.",
+      "type": "array",
+      "title": "List of (Used) AuthenticationMethods",
+      "items": {
+        "$ref": "#/definitions/sessionAuthenticationMethod"
+      }
+    },
+    "sessionDevice": {
+      "type": "object",
+      "properties": {
+        "user_agent": {
+          "description": "UserAgent of this device",
+          "type": "string"
         }
       }
     },
@@ -3294,6 +3352,28 @@
         },
         "password_identifier": {
           "description": "Identifier is the email or username of the user trying to log in.",
+          "type": "string"
+        }
+      }
+    },
+    "submitSelfServiceLoginFlowWithTOTPMethodBody": {
+      "type": "object",
+      "title": "submitSelfServiceLoginFlowWithTOTPMethodBody is used to decode the login form payload.",
+      "required": [
+        "method",
+        "totp_code"
+      ],
+      "properties": {
+        "csrf_token": {
+          "description": "Sending the anti-csrf token is only required for browser login flows.",
+          "type": "string"
+        },
+        "method": {
+          "description": "Method should be set to \"totp\" when logging in using the TOTP strategy.",
+          "type": "string"
+        },
+        "totp_code": {
+          "description": "The TOTP code.",
           "type": "string"
         }
       }
@@ -3458,6 +3538,30 @@
         }
       }
     },
+    "submitSelfServiceSettingsFlowWithTOTPMethodBody": {
+      "type": "object",
+      "required": [
+        "method"
+      ],
+      "properties": {
+        "csrf_token": {
+          "description": "CSRFToken is the anti-CSRF token",
+          "type": "string"
+        },
+        "method": {
+          "description": "Method\n\nShould be set to \"totp\" when trying to add, update, or remove a totp pairing.",
+          "type": "string"
+        },
+        "unlink_totp": {
+          "description": "UnlinkTOTP if true will remove the TOTP pairing,\neffectively removing the credential. This can be used\nto set up a new TOTP device.",
+          "type": "boolean"
+        },
+        "verification_totp": {
+          "description": "ValidationTOTP must contain a valid TOTP based on the",
+          "type": "string"
+        }
+      }
+    },
     "submitSelfServiceVerificationFlowBody": {
       "description": "nolint:deadcode,unused",
       "type": "object"
@@ -3593,11 +3697,16 @@
       "title": "AnchorAttributes represents the attributes of an anchor node.",
       "required": [
         "href",
-        "title"
+        "title",
+        "id"
       ],
       "properties": {
         "href": {
           "description": "The link's href (destination) URL.\n\nformat: uri",
+          "type": "string"
+        },
+        "id": {
+          "description": "A unique identifier",
           "type": "string"
         },
         "title": {
@@ -3616,9 +3725,14 @@
       "type": "object",
       "title": "ImageAttributes represents the attributes of an image node.",
       "required": [
-        "src"
+        "src",
+        "id"
       ],
       "properties": {
+        "id": {
+          "description": "A unique identifier",
+          "type": "string"
+        },
         "src": {
           "description": "The image's source URL.\n\nformat: uri",
           "type": "string"
@@ -3669,9 +3783,14 @@
       "type": "object",
       "title": "TextAttributes represents the attributes of a text node.",
       "required": [
-        "text"
+        "text",
+        "id"
       ],
       "properties": {
+        "id": {
+          "description": "A unique identifier",
+          "type": "string"
+        },
         "text": {
           "$ref": "#/definitions/uiText"
         }

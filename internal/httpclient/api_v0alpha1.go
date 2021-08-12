@@ -2990,10 +2990,15 @@ type V0alpha1ApiApiInitializeSelfServiceLoginFlowForBrowsersRequest struct {
 	ctx        context.Context
 	ApiService V0alpha1Api
 	refresh    *bool
+	aal        *string
 }
 
 func (r V0alpha1ApiApiInitializeSelfServiceLoginFlowForBrowsersRequest) Refresh(refresh bool) V0alpha1ApiApiInitializeSelfServiceLoginFlowForBrowsersRequest {
 	r.refresh = &refresh
+	return r
+}
+func (r V0alpha1ApiApiInitializeSelfServiceLoginFlowForBrowsersRequest) Aal(aal string) V0alpha1ApiApiInitializeSelfServiceLoginFlowForBrowsersRequest {
+	r.aal = &aal
 	return r
 }
 
@@ -3053,6 +3058,9 @@ func (a *V0alpha1ApiService) InitializeSelfServiceLoginFlowForBrowsersExecute(r 
 
 	if r.refresh != nil {
 		localVarQueryParams.Add("refresh", parameterToString(*r.refresh, ""))
+	}
+	if r.aal != nil {
+		localVarQueryParams.Add("aal", parameterToString(*r.aal, ""))
 	}
 	// to determine the Content-Type header
 	localVarHTTPContentTypes := []string{}
@@ -3121,10 +3129,15 @@ type V0alpha1ApiApiInitializeSelfServiceLoginFlowWithoutBrowserRequest struct {
 	ctx        context.Context
 	ApiService V0alpha1Api
 	refresh    *bool
+	aal        *string
 }
 
 func (r V0alpha1ApiApiInitializeSelfServiceLoginFlowWithoutBrowserRequest) Refresh(refresh bool) V0alpha1ApiApiInitializeSelfServiceLoginFlowWithoutBrowserRequest {
 	r.refresh = &refresh
+	return r
+}
+func (r V0alpha1ApiApiInitializeSelfServiceLoginFlowWithoutBrowserRequest) Aal(aal string) V0alpha1ApiApiInitializeSelfServiceLoginFlowWithoutBrowserRequest {
+	r.aal = &aal
 	return r
 }
 
@@ -3185,6 +3198,9 @@ func (a *V0alpha1ApiService) InitializeSelfServiceLoginFlowWithoutBrowserExecute
 
 	if r.refresh != nil {
 		localVarQueryParams.Add("refresh", parameterToString(*r.refresh, ""))
+	}
+	if r.aal != nil {
+		localVarQueryParams.Add("aal", parameterToString(*r.aal, ""))
 	}
 	// to determine the Content-Type header
 	localVarHTTPContentTypes := []string{}
