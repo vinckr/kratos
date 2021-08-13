@@ -10,6 +10,7 @@ docs/AdminCreateIdentityBody.md
 docs/AdminCreateSelfServiceRecoveryLinkBody.md
 docs/AdminUpdateIdentityBody.md
 docs/AuthenticateOKBody.md
+docs/AuthenticatorAssuranceLevel.md
 docs/ContainerChangeResponseItem.md
 docs/ContainerCreateCreatedBody.md
 docs/ContainerTopOKBody.md
@@ -24,6 +25,7 @@ docs/HealthStatus.md
 docs/IdResponse.md
 docs/Identity.md
 docs/IdentityCredentials.md
+docs/IdentityCredentialsType.md
 docs/IdentityState.md
 docs/ImageDeleteResponseItem.md
 docs/ImageSummary.md
@@ -67,7 +69,7 @@ docs/SettingsProfileFormConfig.md
 docs/SubmitSelfServiceLoginFlowBody.md
 docs/SubmitSelfServiceLoginFlowWithOidcMethodBody.md
 docs/SubmitSelfServiceLoginFlowWithPasswordMethodBody.md
-docs/SubmitSelfServiceLoginFlowWithTOTPMethodBody.md
+docs/SubmitSelfServiceLoginFlowWithTotpMethodBody.md
 docs/SubmitSelfServiceLogoutFlowWithoutBrowserBody.md
 docs/SubmitSelfServiceRecoveryFlowBody.md
 docs/SubmitSelfServiceRecoveryFlowWithLinkMethodBody.md
@@ -78,7 +80,7 @@ docs/SubmitSelfServiceSettingsFlowBody.md
 docs/SubmitSelfServiceSettingsFlowWithOidcMethodBody.md
 docs/SubmitSelfServiceSettingsFlowWithPasswordMethodBody.md
 docs/SubmitSelfServiceSettingsFlowWithProfileMethodBody.md
-docs/SubmitSelfServiceSettingsFlowWithTOTPMethodBody.md
+docs/SubmitSelfServiceSettingsFlowWithTotpMethodBody.md
 docs/SubmitSelfServiceVerificationFlowBody.md
 docs/SubmitSelfServiceVerificationFlowWithLinkMethodBody.md
 docs/SuccessfulSelfServiceLoginWithoutBrowser.md
@@ -104,6 +106,7 @@ model_admin_create_identity_body.go
 model_admin_create_self_service_recovery_link_body.go
 model_admin_update_identity_body.go
 model_authenticate_ok_body.go
+model_authenticator_assurance_level.go
 model_container_change_response_item.go
 model_container_create_created_body.go
 model_container_top_ok_body.go
@@ -118,6 +121,7 @@ model_health_status.go
 model_id_response.go
 model_identity.go
 model_identity_credentials.go
+model_identity_credentials_type.go
 model_identity_state.go
 model_image_delete_response_item.go
 model_image_summary.go

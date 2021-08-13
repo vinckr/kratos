@@ -37,10 +37,13 @@
   value:
     - password
     - oidc
+    - totp
 - op: add
   path: /components/schemas/submitSelfServiceLoginFlowBody/oneOf
   value:
     - "$ref": "#/components/schemas/submitSelfServiceLoginFlowWithPasswordMethodBody"
+    - "$ref": "#/components/schemas/submitSelfServiceLoginFlowWithOidcMethodBody"
+    - "$ref": "#/components/schemas/submitSelfServiceLoginFlowWithTotpMethodBody"
 - op: add
   path: /components/schemas/submitSelfServiceLoginFlowBody/discriminator
   value:
@@ -48,6 +51,7 @@
     mapping:
       password: "#/components/schemas/submitSelfServiceLoginFlowWithPasswordMethodBody"
       oidc: "#/components/schemas/submitSelfServiceLoginFlowWithOidcMethodBody"
+      totp: "#/components/schemas/submitSelfServiceLoginFlowWithTotpMethodBody"
 # end
 
 # All modifications for the recovery flow
@@ -111,11 +115,14 @@
     - password
     - profile
     - oidc
+    - totp
 - op: add
   path: /components/schemas/submitSelfServiceSettingsFlowBody/oneOf
   value:
     - "$ref": "#/components/schemas/submitSelfServiceSettingsFlowWithPasswordMethodBody"
     - "$ref": "#/components/schemas/submitSelfServiceSettingsFlowWithProfileMethodBody"
+    - "$ref": "#/components/schemas/submitSelfServiceSettingsFlowWithOidcMethodBody"
+    - "$ref": "#/components/schemas/submitSelfServiceSettingsFlowWithTotpMethodBody"
 - op: add
   path: /components/schemas/submitSelfServiceSettingsFlowBody/discriminator
   value:
@@ -124,6 +131,7 @@
       password: "#/components/schemas/submitSelfServiceSettingsFlowWithPasswordMethodBody"
       profile: "#/components/schemas/submitSelfServiceSettingsFlowWithProfileMethodBody"
       oidc: "#/components/schemas/submitSelfServiceSettingsFlowWithOidcMethodBody"
+      totp: "#/components/schemas/submitSelfServiceSettingsFlowWithTotpMethodBody"
 - op: add
   path: /components/schemas/selfServiceSettingsFlowState/enum
   value:
