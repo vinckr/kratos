@@ -110,7 +110,7 @@ type toSession struct {
 //
 // Uses the HTTP Headers in the GET request to determine (e.g. by using checking the cookies) who is authenticated.
 // Returns a session object in the body or 401 if the credentials are invalid or no credentials were sent.
-// Additionally when the request it successful it adds the user ID to the 'X-Kratos-Authenticated-Identity-Id' header in the response.
+// Additionally when the request is successful it adds the user ID to the 'X-Kratos-Authenticated-Identity-Id' header in the response.
 //
 // If you call this endpoint from a server-side application, you must forward the HTTP Cookie Header to this endpoint:
 //
