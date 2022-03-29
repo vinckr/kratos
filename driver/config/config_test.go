@@ -574,6 +574,10 @@ func TestSession(t *testing.T) {
 	p.MustSet(config.ViperKeySessionName, "ory_session")
 	assert.Equal(t, "ory_session", p.SessionName())
 
+	assert.Equal(t, time.Hour*24, p.SessionRefreshMinTimeLeft())
+	p.MustSet(config.ViperKeySessionRefreshMinTimeLeft, "1m")
+	assert.Equal(t, time.Minute, p.SessionRefreshMinTimeLeft())
+
 	assert.Equal(t, time.Hour*24, p.SessionLifespan())
 	p.MustSet(config.ViperKeySessionLifespan, "1m")
 	assert.Equal(t, time.Minute, p.SessionLifespan())
@@ -1102,13 +1106,6 @@ func TestCourierTemplatesConfig(t *testing.T) {
 		_, err := config.New(ctx, logrusx.New("", ""), os.Stderr,
 			configx.WithConfigFiles("stub/.kratos.courier.remote.partial.templates.yaml"))
 		assert.NoError(t, err)
-	})
-
-	t.Run("case=missing required body plaintext on invalid recovery template", func(t *testing.T) {
-		_, err := config.New(ctx, logrusx.New("", ""), os.Stderr,
-			configx.WithConfigFiles("stub/.kratos.courier.remote.invalid.body.yaml"))
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "missing properties: \"plaintext\"")
 	})
 
 	t.Run("case=load remote template with fallback template overrides path", func(t *testing.T) {
