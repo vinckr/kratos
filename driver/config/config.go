@@ -17,6 +17,7 @@ import (
 
 	"github.com/ory/jsonschema/v3/httploader"
 	"github.com/ory/x/httpx"
+	"github.com/ory/x/otelx"
 
 	"golang.org/x/net/publicsuffix"
 
@@ -45,22 +46,22 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/ory/x/configx"
-	"github.com/ory/x/dbal"
 	"github.com/ory/x/jsonx"
 	"github.com/ory/x/logrusx"
 	"github.com/ory/x/stringsx"
-	"github.com/ory/x/tracing"
 )
 
 const (
 	DefaultIdentityTraitsSchemaID                            = "default"
 	DefaultBrowserReturnURL                                  = "default_browser_return_url"
-	DefaultSQLiteMemoryDSN                                   = dbal.SQLiteInMemory
+	DefaultSQLiteMemoryDSN                                   = "sqlite://file::memory:?_fk=true&cache=shared"
 	DefaultPasswordHashingAlgorithm                          = "argon2"
 	DefaultCipherAlgorithm                                   = "noop"
 	UnknownVersion                                           = "unknown version"
 	ViperKeyDSN                                              = "dsn"
 	ViperKeyCourierSMTPURL                                   = "courier.smtp.connection_uri"
+	ViperKeyCourierSMTPClientCertPath                        = "courier.smtp.client_cert_path"
+	ViperKeyCourierSMTPClientKeyPath                         = "courier.smtp.client_key_path"
 	ViperKeyCourierTemplatesPath                             = "courier.template_override_path"
 	ViperKeyCourierTemplatesRecoveryInvalidEmail             = "courier.templates.recovery.invalid.email"
 	ViperKeyCourierTemplatesRecoveryValidEmail               = "courier.templates.recovery.valid.email"
@@ -239,6 +240,8 @@ type (
 	}
 	CourierConfigs interface {
 		CourierSMTPURL() *url.URL
+		CourierSMTPClientCertPath() string
+		CourierSMTPClientKeyPath() string
 		CourierSMTPFrom() string
 		CourierSMTPFromName() string
 		CourierSMTPHeaders() map[string]string
@@ -871,6 +874,14 @@ func (p *Config) SelfServiceFlowLogoutRedirectURL() *url.URL {
 	return p.p.RequestURIF(ViperKeySelfServiceLogoutBrowserDefaultReturnTo, p.SelfServiceBrowserDefaultReturnTo())
 }
 
+func (p *Config) CourierSMTPClientCertPath() string {
+	return p.p.StringF(ViperKeyCourierSMTPClientCertPath, "")
+}
+
+func (p *Config) CourierSMTPClientKeyPath() string {
+	return p.p.StringF(ViperKeyCourierSMTPClientKeyPath, "")
+}
+
 func (p *Config) CourierSMTPFrom() string {
 	return p.p.StringF(ViperKeyCourierSMTPFrom, "noreply@kratos.ory.sh")
 }
@@ -1016,7 +1027,7 @@ func (p *Config) ParseURI(rawUrl string) (*url.URL, error) {
 	return parsed, nil
 }
 
-func (p *Config) Tracing() *tracing.Config {
+func (p *Config) Tracing() *otelx.Config {
 	return p.p.TracingConfig("Ory Kratos")
 }
 

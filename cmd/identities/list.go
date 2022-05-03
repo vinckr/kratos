@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/ory/x/cloudx"
+
 	"github.com/ory/x/cmdx"
 
 	"github.com/spf13/cobra"
@@ -11,11 +13,24 @@ import (
 	"github.com/ory/kratos/cmd/cliclient"
 )
 
-func NewListCmd() *cobra.Command {
+func NewListCmd(root *cobra.Command) *cobra.Command {
+	c := &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List resources",
+	}
+	c.AddCommand(NewListIdentitiesCmd(root))
+	cliclient.RegisterClientFlags(c.PersistentFlags())
+	cmdx.RegisterFormatFlags(c.PersistentFlags())
+	return c
+}
+
+func NewListIdentitiesCmd(root *cobra.Command) *cobra.Command {
 	return &cobra.Command{
-		Use:   "list [<page> <per-page>]",
-		Short: "List identities",
-		Long:  "List identities (paginated)",
+		Use:     "identities [<page> <per-page>]",
+		Short:   "List identities",
+		Long:    "List identities (paginated)",
+		Example: fmt.Sprintf("%[1]s ls identities 100 1", root.Use),
 		Args: func(cmd *cobra.Command, args []string) error {
 			// zero or exactly two args
 			if len(args) != 0 && len(args) != 2 {
@@ -25,7 +40,11 @@ func NewListCmd() *cobra.Command {
 		},
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c := cliclient.NewClient(cmd)
+			c, err := cliclient.NewClient(cmd)
+			if err != nil {
+				return err
+			}
+
 			req := c.V0alpha2Api.AdminListIdentities(cmd.Context())
 
 			if len(args) == 2 {
@@ -46,8 +65,7 @@ func NewListCmd() *cobra.Command {
 
 			identities, _, err := req.Execute()
 			if err != nil {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Could not get the identities: %+v\n", err)
-				return cmdx.FailSilently(cmd)
+				return cloudx.PrintOpenAPIError(cmd, err)
 			}
 
 			cmdx.PrintTable(cmd, &outputIdentityCollection{
