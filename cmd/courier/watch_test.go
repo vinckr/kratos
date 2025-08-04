@@ -1,7 +1,10 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package courier
 
 import (
-	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -10,30 +13,25 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ory/kratos/internal"
+	"github.com/ory/x/configx"
 )
 
 func TestStartCourier(t *testing.T) {
 	t.Run("case=without metrics", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
 		_, r := internal.NewFastRegistryWithMocks(t)
-		go StartCourier(ctx, r)
+		go StartCourier(t.Context(), r)
 		time.Sleep(time.Second)
-		require.Equal(t, r.Config(ctx).CourierExposeMetricsPort(), 0)
-		cancel()
-
+		require.Equal(t, r.Config().CourierExposeMetricsPort(t.Context()), 0)
 	})
+
 	t.Run("case=with metrics", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		_, r := internal.NewFastRegistryWithMocks(t)
 		port, err := freeport.GetFreePort()
 		require.NoError(t, err)
-		r.Config(ctx).Set("expose-metrics-port", port)
-		go StartCourier(ctx, r)
+		_, r := internal.NewFastRegistryWithMocks(t, configx.WithValue("expose-metrics-port", port))
+		go StartCourier(t.Context(), r)
 		time.Sleep(time.Second)
-		res, err := http.Get("http://" + r.Config(ctx).MetricsListenOn() + "/metrics/prometheus")
+		res, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics/prometheus", port))
 		require.NoError(t, err)
 		require.Equal(t, 200, res.StatusCode)
-		cancel()
 	})
-
 }

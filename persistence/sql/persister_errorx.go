@@ -1,40 +1,41 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package sql
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
-
-	"github.com/ory/kratos/x"
-
-	"github.com/ory/kratos/corp"
 
 	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
-
-	"github.com/ory/jsonschema/v3"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/ory/herodot"
-	"github.com/ory/x/sqlcon"
-
+	"github.com/ory/jsonschema/v3"
 	"github.com/ory/kratos/selfservice/errorx"
+	"github.com/ory/pop/v6"
+	"github.com/ory/x/otelx"
+	"github.com/ory/x/sqlcon"
 )
 
 var _ errorx.Persister = new(Persister)
 
-func (p *Persister) Add(ctx context.Context, csrfToken string, errs error) (uuid.UUID, error) {
-	buf, err := p.encodeSelfServiceErrors(errs)
+func (p *Persister) CreateErrorContainer(ctx context.Context, csrfToken string, errs error) (containerID uuid.UUID, err error) {
+	ctx, span := p.r.Tracer(ctx).Tracer().Start(ctx, "persistence.sql.CreateErrorContainer")
+	defer otelx.End(span, &err)
+
+	message, err := encodeSelfServiceErrors(errs)
 	if err != nil {
 		return uuid.Nil, err
 	}
 
 	c := &errorx.ErrorContainer{
-		ID:        x.NewUUID(),
-		NID:       corp.ContextualizeNID(ctx, p.nid),
+		ID:        uuid.Nil,
+		NID:       p.NetworkID(ctx),
 		CSRFToken: csrfToken,
-		Errors:    buf.Bytes(),
+		Errors:    message,
 		WasSeen:   false,
 	}
 
@@ -42,42 +43,52 @@ func (p *Persister) Add(ctx context.Context, csrfToken string, errs error) (uuid
 		return uuid.Nil, sqlcon.HandleError(err)
 	}
 
+	span.SetAttributes(attribute.String("id", c.ID.String()))
+
 	return c.ID, nil
 }
 
-func (p *Persister) Read(ctx context.Context, id uuid.UUID) (*errorx.ErrorContainer, error) {
-	var ec errorx.ErrorContainer
-	if err := p.GetConnection(ctx).Where("id = ? AND nid = ?", id, corp.ContextualizeNID(ctx, p.nid)).First(&ec); err != nil {
-		return nil, sqlcon.HandleError(err)
-	}
+func (p *Persister) ReadErrorContainer(ctx context.Context, id uuid.UUID) (_ *errorx.ErrorContainer, err error) {
+	ctx, span := p.r.Tracer(ctx).Tracer().Start(ctx, "persistence.sql.ReadErrorContainer")
+	defer otelx.End(span, &err)
 
-	// #nosec G201
-	if err := p.GetConnection(ctx).RawQuery(
-		fmt.Sprintf("UPDATE %s SET was_seen = true, seen_at = ? WHERE id = ? AND nid = ?", corp.ContextualizeTableName(ctx, "selfservice_errors")),
-		time.Now().UTC(), id, corp.ContextualizeNID(ctx, p.nid)).Exec(); err != nil {
-		return nil, sqlcon.HandleError(err)
+	var ec errorx.ErrorContainer
+	if err := p.Transaction(ctx, func(ctx context.Context, c *pop.Connection) error {
+		if err := c.Where("id = ? AND nid = ?", id, p.NetworkID(ctx)).First(&ec); err != nil {
+			return sqlcon.HandleError(err)
+		}
+
+		if err := c.RawQuery(
+			"UPDATE selfservice_errors SET was_seen = true, seen_at = ? WHERE id = ? AND nid = ?",
+			time.Now().UTC(), id, p.NetworkID(ctx)).Exec(); err != nil {
+			return sqlcon.HandleError(err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return &ec, nil
 }
 
-func (p *Persister) Clear(ctx context.Context, olderThan time.Duration, force bool) (err error) {
+func (p *Persister) ClearErrorContainers(ctx context.Context, olderThan time.Duration, force bool) (err error) {
+	ctx, span := p.r.Tracer(ctx).Tracer().Start(ctx, "persistence.sql.ClearErrorContainers")
+	defer otelx.End(span, &err)
+
 	if force {
-		// #nosec G201
 		err = p.GetConnection(ctx).RawQuery(
-			fmt.Sprintf("DELETE FROM %s WHERE nid = ? AND seen_at < ? AND seen_at IS NOT NULL", corp.ContextualizeTableName(ctx, "selfservice_errors")),
-			corp.ContextualizeNID(ctx, p.nid), time.Now().UTC().Add(-olderThan)).Exec()
+			"DELETE FROM selfservice_errors WHERE nid = ? AND seen_at < ? AND seen_at IS NOT NULL",
+			p.NetworkID(ctx), time.Now().UTC().Add(-olderThan)).Exec()
 	} else {
-		// #nosec G201
 		err = p.GetConnection(ctx).RawQuery(
-			fmt.Sprintf("DELETE FROM %s WHERE nid = ? AND was_seen=true AND seen_at < ? AND seen_at IS NOT NULL", corp.ContextualizeTableName(ctx, "selfservice_errors")),
-			corp.ContextualizeNID(ctx, p.nid), time.Now().UTC().Add(-olderThan)).Exec()
+			"DELETE FROM selfservice_errors WHERE nid = ? AND was_seen=true AND seen_at < ? AND seen_at IS NOT NULL",
+			p.NetworkID(ctx), time.Now().UTC().Add(-olderThan)).Exec()
 	}
 
 	return sqlcon.HandleError(err)
 }
 
-func (p *Persister) encodeSelfServiceErrors(e error) (*bytes.Buffer, error) {
+func encodeSelfServiceErrors(e error) ([]byte, error) {
 	if e == nil {
 		return nil, errors.WithStack(herodot.ErrInternalServerError.WithDebug("A nil error was passed to the error manager which is most likely a code bug."))
 	}
@@ -90,10 +101,10 @@ func (p *Persister) encodeSelfServiceErrors(e error) (*bytes.Buffer, error) {
 		e = herodot.ToDefaultError(e, "")
 	}
 
-	var b bytes.Buffer
-	if err := json.NewEncoder(&b).Encode(e); err != nil {
+	enc, err := json.Marshal(e)
+	if err != nil {
 		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReason("Unable to encode error messages.").WithDebug(err.Error()))
 	}
 
-	return &b, nil
+	return enc, nil
 }

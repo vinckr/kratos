@@ -1,3 +1,6 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package node
 
 import (
@@ -21,11 +24,12 @@ import (
 type UiNodeType string
 
 const (
-	Text   UiNodeType = "text"
-	Input  UiNodeType = "input"
-	Image  UiNodeType = "img"
-	Anchor UiNodeType = "a"
-	Script UiNodeType = "script"
+	Text     UiNodeType = "text"
+	Input    UiNodeType = "input"
+	Image    UiNodeType = "img"
+	Anchor   UiNodeType = "a"
+	Script   UiNodeType = "script"
+	Division UiNodeType = "div"
 )
 
 func (t UiNodeType) String() string {
@@ -36,14 +40,19 @@ func (t UiNodeType) String() string {
 type UiNodeGroup string
 
 const (
-	DefaultGroup       UiNodeGroup = "default"
-	PasswordGroup      UiNodeGroup = "password"
-	OpenIDConnectGroup UiNodeGroup = "oidc"
-	ProfileGroup       UiNodeGroup = "profile"
-	LinkGroup          UiNodeGroup = "link"
-	TOTPGroup          UiNodeGroup = "totp"
-	LookupGroup        UiNodeGroup = "lookup_secret"
-	WebAuthnGroup      UiNodeGroup = "webauthn"
+	DefaultGroup         UiNodeGroup = "default"
+	PasswordGroup        UiNodeGroup = "password"
+	OpenIDConnectGroup   UiNodeGroup = "oidc"
+	ProfileGroup         UiNodeGroup = "profile"
+	LinkGroup            UiNodeGroup = "link"
+	CodeGroup            UiNodeGroup = "code"
+	TOTPGroup            UiNodeGroup = "totp"
+	LookupGroup          UiNodeGroup = "lookup_secret"
+	WebAuthnGroup        UiNodeGroup = "webauthn"
+	PasskeyGroup         UiNodeGroup = "passkey"
+	IdentifierFirstGroup UiNodeGroup = "identifier_first"
+	CaptchaGroup         UiNodeGroup = "captcha" // Available in OEL
+	SAMLGroup            UiNodeGroup = "saml"    // Available in OEL
 )
 
 func (g UiNodeGroup) String() string {
@@ -213,6 +222,7 @@ func SortUseOrder(keysInOrder []string) func(*sortOptions) {
 		options.keysInOrder = keysInOrder
 	}
 }
+
 func SortUseOrderAppend(keysInOrder []string) func(*sortOptions) {
 	return func(options *sortOptions) {
 		options.keysInOrderAppend = keysInOrder
@@ -276,7 +286,8 @@ func (n Nodes) SortBySchema(ctx context.Context, opts ...SortOption) error {
 		a := n[i]
 		b := n[j]
 
-		if a.Group == b.Group {
+		if a.Group == b.Group ||
+			(a.Group == "default" && b.Group == "password") || (b.Group == "default" && a.Group == "password") {
 			pa, pb := getKeyPosition(a), getKeyPosition(b)
 			if pa < pb {
 				return true
@@ -348,6 +359,37 @@ func (n *Nodes) Append(node *Node) {
 	*n = append(*n, node)
 }
 
+func (n *Nodes) RemoveMatching(node *Node) {
+	if n == nil {
+		return
+	}
+
+	r := Nodes{}
+	for k, v := range *n {
+		if !(*n)[k].Matches(node) {
+			r = append(r, v)
+		}
+	}
+
+	*n = r
+}
+
+func (n *Node) Matches(needle *Node) bool {
+	if len(needle.ID()) > 0 && n.ID() != needle.ID() {
+		return false
+	}
+
+	if needle.Type != "" && n.Type != needle.Type {
+		return false
+	}
+
+	if needle.Group != "" && n.Group != needle.Group {
+		return false
+	}
+
+	return n.Attributes.Matches(needle.Attributes)
+}
+
 func (n *Node) UnmarshalJSON(data []byte) error {
 	var attr Attributes
 	switch t := gjson.GetBytes(data, "type").String(); UiNodeType(t) {
@@ -370,6 +412,10 @@ func (n *Node) UnmarshalJSON(data []byte) error {
 	case Script:
 		attr = &ScriptAttributes{
 			NodeType: Script,
+		}
+	case Division:
+		attr = &DivisionAttributes{
+			NodeType: Division,
 		}
 	default:
 		return fmt.Errorf("unexpected node type: %s", t)
@@ -409,6 +455,9 @@ func (n *Node) MarshalJSON() ([]byte, error) {
 		case *ScriptAttributes:
 			t = Script
 			attr.NodeType = Script
+		case *DivisionAttributes:
+			t = Division
+			attr.NodeType = Division
 		default:
 			return nil, errors.WithStack(fmt.Errorf("unknown node type: %T", n.Attributes))
 		}

@@ -1,3 +1,6 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package x
 
 import (
@@ -8,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/gorilla/sessions"
-	"github.com/julienschmidt/httprouter"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,8 +30,8 @@ func TestSession(t *testing.T) {
 		assert.EqualValues(t, 78652871, cookie.Options.MaxAge, "we ensure the options are always copied correctly.")
 	}
 
-	router := httprouter.New()
-	router.GET("/set", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	router := http.NewServeMux()
+	router.HandleFunc("GET /set", func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, SessionPersistValues(w, r, s, sid, map[string]interface{}{
 			"string-1": "foo",
 			"string-2": "bar",
@@ -52,7 +55,7 @@ func TestSession(t *testing.T) {
 
 	t.Run("case=GetString", func(t *testing.T) {
 		id := "get-string"
-		router.GET("/"+id, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.HandleFunc("GET /"+id, func(w http.ResponseWriter, r *http.Request) {
 			got, err := SessionGetString(r, s, sid, "string-1")
 			require.NoError(t, err)
 			assert.EqualValues(t, "foo", got)
@@ -78,7 +81,7 @@ func TestSession(t *testing.T) {
 	t.Run("case=GetStringMultipleCookies", func(t *testing.T) {
 		id := "get-string-multiple"
 
-		router.GET("/set/"+id, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.HandleFunc("GET /set/"+id, func(w http.ResponseWriter, r *http.Request) {
 			require.NoError(t, SessionPersistValues(w, r, s, sid, map[string]interface{}{
 				"multiple-string-1": "foo",
 			}))
@@ -89,7 +92,7 @@ func TestSession(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		})
 
-		router.GET("/get/"+id, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.HandleFunc("GET /get/"+id, func(w http.ResponseWriter, r *http.Request) {
 			got, err := SessionGetString(r, s, sid, "multiple-string-1")
 			require.NoError(t, err)
 			assert.EqualValues(t, "foo", got)
@@ -119,7 +122,7 @@ func TestSession(t *testing.T) {
 
 	t.Run("case=GetStringOr", func(t *testing.T) {
 		id := "get-string-or"
-		router.GET("/"+id, func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.HandleFunc("GET /"+id, func(w http.ResponseWriter, r *http.Request) {
 			assert.EqualValues(t, "foo", SessionGetStringOr(r, s, sid, "string-1", "baz"))
 			assert.EqualValues(t, "bar", SessionGetStringOr(r, s, sid, "string-2", "baz"))
 			assert.EqualValues(t, "", SessionGetStringOr(r, s, sid, "string-3", "baz"))
@@ -186,14 +189,14 @@ func TestSession(t *testing.T) {
 		})
 
 		id := "session-unset"
-		router.GET("/"+id+"/unset", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.HandleFunc("GET /"+id+"/unset", func(w http.ResponseWriter, r *http.Request) {
 			require.NoError(t, SessionUnset(w, r, s, sid))
 			w.WriteHeader(http.StatusNoContent)
 			cookie, _ := s.Get(r, sid)
 			assert.EqualValues(t, -1, cookie.Options.MaxAge, "we ensure the options are always copied correctly.")
 		})
 
-		router.GET("/"+id+"/get", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.HandleFunc("GET /"+id+"/get", func(w http.ResponseWriter, r *http.Request) {
 			require.Empty(t, SessionGetStringOr(r, s, sid, "string-1", ""))
 			require.Empty(t, SessionGetStringOr(r, s, sid, "string-2", ""))
 			require.Empty(t, SessionGetStringOr(r, s, sid, "string-3", ""))
@@ -228,13 +231,13 @@ func TestSession(t *testing.T) {
 		})
 
 		id := "session-unset-key"
-		router.GET("/"+id+"/unset", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.HandleFunc("GET /"+id+"/unset", func(w http.ResponseWriter, r *http.Request) {
 			require.NoError(t, SessionUnsetKey(w, r, s, sid, "string-1"))
 			w.WriteHeader(http.StatusNoContent)
 			isExpiryCorrect(t, r)
 		})
 
-		router.GET("/"+id+"/expect-unset", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.HandleFunc("GET /"+id+"/expect-unset", func(w http.ResponseWriter, r *http.Request) {
 			require.Empty(t, SessionGetStringOr(r, s, sid, "string-1", ""))
 			require.Empty(t, SessionGetStringOr(r, s, sid, "string-2", ""))
 			require.Empty(t, SessionGetStringOr(r, s, sid, "string-3", ""))
@@ -243,7 +246,7 @@ func TestSession(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		})
 
-		router.GET("/"+id+"/expect-one", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		router.HandleFunc("GET /"+id+"/expect-one", func(w http.ResponseWriter, r *http.Request) {
 			require.Empty(t, SessionGetStringOr(r, s, sid, "string-1", ""))
 			assert.EqualValues(t, "bar", SessionGetStringOr(r, s, sid, "string-2", "baz"))
 			assert.EqualValues(t, "", SessionGetStringOr(r, s, sid, "string-3", "baz"))

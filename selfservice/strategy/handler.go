@@ -1,9 +1,10 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package strategy
 
 import (
 	"net/http"
-
-	"github.com/julienschmidt/httprouter"
 
 	"github.com/ory/herodot"
 	"github.com/ory/kratos/driver/config"
@@ -17,32 +18,16 @@ type disabledChecker interface {
 	x.WriterProvider
 }
 
-func disabledWriter(c disabledChecker, enabled bool, wrap httprouter.Handle, w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+func disabledWriter(c disabledChecker, enabled bool, wrap http.HandlerFunc, w http.ResponseWriter, r *http.Request) {
 	if !enabled {
 		c.Writer().WriteError(w, r, herodot.ErrNotFound.WithReason(EndpointDisabledMessage))
 		return
 	}
-	wrap(w, r, ps)
+	wrap(w, r)
 }
 
-func IsDisabled(c disabledChecker, strategy string, wrap httprouter.Handle) httprouter.Handle {
-	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		disabledWriter(c, c.Config(r.Context()).SelfServiceStrategy(strategy).Enabled, wrap, w, r, ps)
-	}
-}
-
-func IsRecoveryDisabled(c disabledChecker, strategy string, wrap httprouter.Handle) httprouter.Handle {
-	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		disabledWriter(c,
-			c.Config(r.Context()).SelfServiceStrategy(strategy).Enabled && c.Config(r.Context()).SelfServiceFlowRecoveryEnabled(),
-			wrap, w, r, ps)
-	}
-}
-
-func IsVerificationDisabled(c disabledChecker, strategy string, wrap httprouter.Handle) httprouter.Handle {
-	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		disabledWriter(c,
-			c.Config(r.Context()).SelfServiceStrategy(strategy).Enabled && c.Config(r.Context()).SelfServiceFlowVerificationEnabled(),
-			wrap, w, r, ps)
+func IsDisabled(c disabledChecker, strategy string, wrap http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		disabledWriter(c, c.Config().SelfServiceStrategy(r.Context(), strategy).Enabled, wrap, w, r)
 	}
 }

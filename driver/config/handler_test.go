@@ -1,46 +1,70 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package config_test
 
 import (
-	"io/ioutil"
-	"net/http/httptest"
+	"context"
+	"io"
 	"testing"
 
-	"github.com/julienschmidt/httprouter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/internal"
+	"github.com/ory/kratos/x"
+	"github.com/ory/x/contextx"
 )
 
+type configProvider struct {
+	cfg *config.Config
+}
+
+func (c *configProvider) Config() *config.Config {
+	return c.cfg
+}
+
 func TestNewConfigHashHandler(t *testing.T) {
-	conf, reg := internal.NewFastRegistryWithMocks(t)
-	router := httprouter.New()
-	config.NewConfigHashHandler(reg, router)
-	ts := httptest.NewServer(router)
+	ctx := context.Background()
+	cfg := internal.NewConfigurationWithDefaults(t)
+	router := x.NewRouterPublic()
+	config.NewConfigHashHandler(&configProvider{cfg: cfg}, router)
+	ts := contextx.NewConfigurableTestServer(router)
 	t.Cleanup(ts.Close)
-	res, err := ts.Client().Get(ts.URL + "/health/config")
+
+	// first request, get baseline hash
+	res, err := ts.Client(ctx).Get(ts.URL + "/health/config")
 	require.NoError(t, err)
 	defer res.Body.Close()
 	require.Equal(t, 200, res.StatusCode)
-	first, err := ioutil.ReadAll(res.Body)
+	first, err := io.ReadAll(res.Body)
 	require.NoError(t, err)
 
-	res, err = ts.Client().Get(ts.URL + "/health/config")
+	// second request, no config change
+	res, err = ts.Client(ctx).Get(ts.URL + "/health/config")
 	require.NoError(t, err)
 	defer res.Body.Close()
 	require.Equal(t, 200, res.StatusCode)
-	second, err := ioutil.ReadAll(res.Body)
+	second, err := io.ReadAll(res.Body)
 	require.NoError(t, err)
 	assert.Equal(t, first, second)
 
-	require.NoError(t, conf.Set(config.ViperKeySessionDomain, "foobar"))
-
-	res, err = ts.Client().Get(ts.URL + "/health/config")
+	// third request, with config change
+	res, err = ts.Client(contextx.WithConfigValue(ctx, config.ViperKeySessionDomain, "foobar")).Get(ts.URL + "/health/config")
 	require.NoError(t, err)
 	defer res.Body.Close()
 	require.Equal(t, 200, res.StatusCode)
-	second, err = ioutil.ReadAll(res.Body)
+	third, err := io.ReadAll(res.Body)
 	require.NoError(t, err)
-	assert.NotEqual(t, first, second)
+	assert.NotEqual(t, first, third)
+
+	// fourth request, no config change
+	res, err = ts.Client(ctx).Get(ts.URL + "/health/config")
+	require.NoError(t, err)
+	defer res.Body.Close()
+	require.Equal(t, 200, res.StatusCode)
+	fourth, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	assert.Equal(t, first, fourth)
 }

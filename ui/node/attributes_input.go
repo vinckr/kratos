@@ -1,3 +1,6 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package node
 
 import (
@@ -5,14 +8,15 @@ import (
 
 	"github.com/ory/kratos/text"
 	"github.com/ory/kratos/x"
+	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/x/jsonschemax"
 )
 
 const DisableFormField = "disableFormField"
 
-func toFormType(n string, i interface{}) InputAttributeType {
+func toFormType(n string, i interface{}) UiNodeInputAttributeType {
 	switch n {
-	case x.CSRFTokenName:
+	case nosurfx.CSRFTokenName:
 		return InputAttributeTypeHidden
 	case "password":
 		return InputAttributeTypePassword
@@ -33,6 +37,12 @@ type InputAttributesModifiers []InputAttributesModifier
 
 func WithRequiredInputAttribute(a *InputAttributes) {
 	a.Required = true
+}
+
+func WithMaxLengthInputAttribute(maxLength int) func(a *InputAttributes) {
+	return func(a *InputAttributes) {
+		a.MaxLength = maxLength
+	}
 }
 
 func WithInputAttributes(f func(a *InputAttributes)) func(a *InputAttributes) {
@@ -67,13 +77,23 @@ func applyImageAttributes(opts ImageAttributesModifiers, attributes *ImageAttrib
 type ScriptAttributesModifier func(attributes *ScriptAttributes)
 type ScriptAttributesModifiers []ScriptAttributesModifier
 
-func WithScriptAttributes(f func(a *ScriptAttributes)) func(a *ScriptAttributes) {
-	return func(a *ScriptAttributes) {
+func applyScriptAttributes(opts ScriptAttributesModifiers, attributes *ScriptAttributes) *ScriptAttributes {
+	for _, f := range opts {
+		f(attributes)
+	}
+	return attributes
+}
+
+type DivisionAttributesModifier func(attributes *DivisionAttributes)
+type DivisionAttributesModifiers []DivisionAttributesModifier
+
+func WithDivisionAttributes(f func(a *DivisionAttributes)) func(a *DivisionAttributes) {
+	return func(a *DivisionAttributes) {
 		f(a)
 	}
 }
 
-func applyScriptAttributes(opts ScriptAttributesModifiers, attributes *ScriptAttributes) *ScriptAttributes {
+func applyDivisionAttributes(opts DivisionAttributesModifiers, attributes *DivisionAttributes) *DivisionAttributes {
 	for _, f := range opts {
 		f(attributes)
 	}
@@ -89,7 +109,7 @@ func NewInputFieldFromJSON(name string, value interface{}, group UiNodeGroup, op
 	}
 }
 
-func NewInputField(name string, value interface{}, group UiNodeGroup, inputType InputAttributeType, opts ...InputAttributesModifier) *Node {
+func NewInputField(name string, value interface{}, group UiNodeGroup, inputType UiNodeInputAttributeType, opts ...InputAttributesModifier) *Node {
 	return &Node{
 		Type:       Input,
 		Group:      group,
@@ -112,6 +132,15 @@ func NewTextField(id string, text *text.Message, group UiNodeGroup) *Node {
 		Type:       Text,
 		Group:      group,
 		Attributes: &TextAttributes{Text: text, Identifier: id},
+		Meta:       &Meta{},
+	}
+}
+
+func NewDivisionField(id string, group UiNodeGroup, opts ...DivisionAttributesModifier) *Node {
+	return &Node{
+		Type:       Division,
+		Group:      group,
+		Attributes: applyDivisionAttributes(opts, &DivisionAttributes{Identifier: id}),
 		Meta:       &Meta{},
 	}
 }
@@ -156,10 +185,15 @@ func NewInputFieldFromSchema(name string, group UiNodeGroup, p jsonschemax.Path,
 		attr.Type = InputAttributeTypeDateTimeLocal
 	case "email":
 		attr.Type = InputAttributeTypeEmail
+		attr.Autocomplete = InputAttributeAutocompleteEmail
+	case "tel":
+		attr.Type = InputAttributeTypeTel
+		attr.Autocomplete = InputAttributeAutocompleteTel
 	case "date":
 		attr.Type = InputAttributeTypeDate
 	case "uri":
 		attr.Type = InputAttributeTypeURI
+		attr.Autocomplete = InputAttributeAutocompleteUrl
 	case "regex":
 		attr.Type = InputAttributeTypeText
 	}

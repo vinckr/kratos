@@ -1,9 +1,14 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package testhelpers
 
 import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/ory/kratos/x/nosurfx"
 
 	"github.com/urfave/negroni"
 
@@ -25,24 +30,28 @@ func NewKratosServerWithCSRF(t *testing.T, reg driver.Registry) (public, admin *
 
 func NewKratosServerWithCSRFAndRouters(t *testing.T, reg driver.Registry) (public, admin *httptest.Server, rp *x.RouterPublic, ra *x.RouterAdmin) {
 	rp, ra = x.NewRouterPublic(), x.NewRouterAdmin()
-	csrfHandler := x.NewTestCSRFHandler(rp, reg)
+	csrfHandler := nosurfx.NewTestCSRFHandler(rp, reg)
 	reg.WithCSRFHandler(csrfHandler)
 	ran := negroni.New()
 	ran.UseFunc(x.RedirectAdminMiddleware)
 	ran.UseHandler(ra)
-	public = httptest.NewServer(x.NewTestCSRFHandler(rp, reg))
+	rpn := negroni.New()
+	rpn.UseFunc(x.HTTPLoaderContextMiddleware(reg))
+	rpn.UseHandler(rp)
+	public = httptest.NewServer(nosurfx.NewTestCSRFHandler(rpn, reg))
 	admin = httptest.NewServer(ran)
+	ctx := context.Background()
 
 	// Workaround for:
 	// - https://github.com/golang/go/issues/12610
 	// - https://github.com/golang/go/issues/31054
 	public.URL = strings.Replace(public.URL, "127.0.0.1", "localhost", -1)
 
-	if len(reg.Config(context.Background()).Source().String(config.ViperKeySelfServiceLoginUI)) == 0 {
-		reg.Config(context.Background()).MustSet(config.ViperKeySelfServiceLoginUI, "http://NewKratosServerWithCSRF/you-forgot-to-set-me/login")
+	if len(reg.Config().GetProvider(ctx).String(config.ViperKeySelfServiceLoginUI)) == 0 {
+		reg.Config().MustSet(ctx, config.ViperKeySelfServiceLoginUI, "http://NewKratosServerWithCSRF/you-forgot-to-set-me/login")
 	}
-	reg.Config(context.Background()).MustSet(config.ViperKeyPublicBaseURL, public.URL)
-	reg.Config(context.Background()).MustSet(config.ViperKeyAdminBaseURL, admin.URL)
+	reg.Config().MustSet(ctx, config.ViperKeyPublicBaseURL, public.URL)
+	reg.Config().MustSet(ctx, config.ViperKeyAdminBaseURL, admin.URL)
 
 	reg.RegisterRoutes(context.Background(), rp, ra)
 
@@ -63,11 +72,12 @@ func NewKratosServerWithRouters(t *testing.T, reg driver.Registry, rp *x.RouterP
 }
 
 func InitKratosServers(t *testing.T, reg driver.Registry, public, admin *httptest.Server) {
-	if len(reg.Config(context.Background()).Source().String(config.ViperKeySelfServiceLoginUI)) == 0 {
-		reg.Config(context.Background()).MustSet(config.ViperKeySelfServiceLoginUI, "http://NewKratosServerWithRouters/you-forgot-to-set-me/login")
+	ctx := t.Context()
+	if len(reg.Config().GetProvider(ctx).String(config.ViperKeySelfServiceLoginUI)) == 0 {
+		reg.Config().MustSet(ctx, config.ViperKeySelfServiceLoginUI, "http://NewKratosServerWithRouters/you-forgot-to-set-me/login")
 	}
-	reg.Config(context.Background()).MustSet(config.ViperKeyPublicBaseURL, public.URL)
-	reg.Config(context.Background()).MustSet(config.ViperKeyAdminBaseURL, admin.URL)
+	reg.Config().MustSet(ctx, config.ViperKeyPublicBaseURL, public.URL)
+	reg.Config().MustSet(ctx, config.ViperKeyAdminBaseURL, admin.URL)
 
 	reg.RegisterRoutes(context.Background(), public.Config.Handler.(*x.RouterPublic), admin.Config.Handler.(*x.RouterAdmin))
 }

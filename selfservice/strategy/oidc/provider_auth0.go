@@ -1,17 +1,22 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package oidc
 
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/url"
 	"path"
-	"strconv"
 	"time"
 
-	"github.com/hashicorp/go-retryablehttp"
-
 	"github.com/ory/x/httpx"
+	"github.com/ory/x/stringsx"
+
+	"github.com/tidwall/sjson"
+
+	"github.com/hashicorp/go-retryablehttp"
 
 	"github.com/pkg/errors"
 	"github.com/tidwall/gjson"
@@ -24,10 +29,12 @@ type ProviderAuth0 struct {
 	*ProviderGenericOIDC
 }
 
+var _ OAuth2Provider = (*ProviderAuth0)(nil)
+
 func NewProviderAuth0(
 	config *Configuration,
-	reg dependencies,
-) *ProviderAuth0 {
+	reg Dependencies,
+) Provider {
 	return &ProviderAuth0{
 		ProviderGenericOIDC: &ProviderGenericOIDC{
 			config: config,
@@ -56,7 +63,7 @@ func (g *ProviderAuth0) oauth2(ctx context.Context) (*oauth2.Config, error) {
 			TokenURL: tokenUrl.String(),
 		},
 		Scopes:      g.config.Scope,
-		RedirectURL: g.config.Redir(g.reg.Config(ctx).OIDCRedirectURIBase()),
+		RedirectURL: g.config.Redir(g.reg.Config().OIDCRedirectURIBase(ctx)),
 	}
 
 	return c, nil
@@ -72,18 +79,18 @@ func (g *ProviderAuth0) Claims(ctx context.Context, exchange *oauth2.Token, quer
 		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))
 	}
 
-	client := g.reg.HTTPClient(ctx, httpx.ResilientClientWithClient(o.Client(ctx, exchange)))
 	u, err := url.Parse(g.config.IssuerURL)
 	if err != nil {
 		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))
 	}
 	u.Path = path.Join(u.Path, "/userinfo")
-	req, err := retryablehttp.NewRequest("GET", u.String(), nil)
+
+	ctx, client := httpx.SetOAuth2(ctx, g.reg.HTTPClient(ctx), o, exchange)
+	req, err := retryablehttp.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
 		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))
 	}
 
-	req.Header.Add("Authorization", "Bearer: "+exchange.AccessToken)
 	req.Header.Add("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
@@ -92,51 +99,19 @@ func (g *ProviderAuth0) Claims(ctx context.Context, exchange *oauth2.Token, quer
 	}
 	defer resp.Body.Close()
 
-	// There is a bug in the response from Auth0. The updated_at field may be a string and not an int64.
-	// https://community.auth0.com/t/oidc-id-token-claim-updated-at-violates-oidc-specification-breaks-rp-implementations/24098
-	// We work around this by reading the json generically (as map[string]inteface{} and looking at the updated_at field
-	// if it exists. If it's the wrong type (string), we fill out the claims by hand.
+	if err := logUpstreamError(g.reg.Logger(), resp); err != nil {
+		return nil, err
+	}
 
 	// Once auth0 fixes this bug, all this workaround can be removed.
-	b, err := ioutil.ReadAll(resp.Body)
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	if err != nil {
 		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))
 	}
 
-	// Force updatedAt to be an int if given as a string in the response.
-	if updatedAtField := gjson.GetBytes(b, "updated_at"); updatedAtField.Exists() {
-		v := updatedAtField.Value()
-		switch v.(type) {
-		case string:
-			t, err := time.Parse(time.RFC3339, updatedAtField.String())
-			if err != nil {
-				return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("bad time format in updated_at"))
-			}
-			updatedAt := t.Unix()
-
-			// Unmarshal into generic map, replace the updated_at value with the correct type, then re-marshal.
-			var data map[string]interface{}
-			err = json.Unmarshal(b, &data)
-			if err != nil {
-				return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("bad type in response"))
-			}
-
-			// convert the correct int64 type back to a string, so we can Marshal it.
-			data["updated_at"] = strconv.FormatInt(updatedAt, 10)
-
-			// now remarshal so the unmarshal into Claims works.
-			b, err = json.Marshal(data)
-			if err != nil {
-				return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))
-			}
-
-		case float64:
-			// nothing to do
-			break
-
-		default:
-			return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("bad updated_at type"))
-		}
+	b, err = authZeroUpdatedAtWorkaround(b)
+	if err != nil {
+		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))
 	}
 
 	// Once we get here, we know that if there is an updated_at field in the json, it is the correct type.
@@ -145,5 +120,25 @@ func (g *ProviderAuth0) Claims(ctx context.Context, exchange *oauth2.Token, quer
 		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))
 	}
 
+	claims.Issuer = stringsx.Coalesce(claims.Issuer, g.config.IssuerURL)
 	return &claims, nil
+}
+
+// There is a bug in the response from Auth0. The updated_at field may be a string and not an int64.
+// https://community.auth0.com/t/oidc-id-token-claim-updated-at-violates-oidc-specification-breaks-rp-implementations/24098
+// We work around this by reading the json generically (as map[string]inteface{} and looking at the updated_at field
+// if it exists. If it's the wrong type (string), we fill out the claims by hand.
+func authZeroUpdatedAtWorkaround(body []byte) ([]byte, error) {
+	// Force updatedAt to be an int if given as a string in the response.
+	if updatedAtField := gjson.GetBytes(body, "updated_at"); updatedAtField.Exists() && updatedAtField.Type == gjson.String {
+		t, err := time.Parse(time.RFC3339, updatedAtField.String())
+		if err != nil {
+			return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("bad time format in updated_at"))
+		}
+		body, err = sjson.SetBytes(body, "updated_at", t.Unix())
+		if err != nil {
+			return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))
+		}
+	}
+	return body, nil
 }

@@ -1,16 +1,19 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package identity
 
 import (
 	"context"
+	"fmt"
 	"time"
-
-	"github.com/ory/kratos/corp"
 
 	"github.com/gofrs/uuid"
 )
 
 const (
 	RecoveryAddressTypeEmail RecoveryAddressType = AddressTypeEmail
+	RecoveryAddressTypeSMS   RecoveryAddressType = AddressTypeSMS
 )
 
 type (
@@ -45,16 +48,27 @@ func (v RecoveryAddressType) HTMLFormInputType() string {
 	switch v {
 	case RecoveryAddressTypeEmail:
 		return "email"
+	case RecoveryAddressTypeSMS:
+		return "tel"
 	}
 	return ""
 }
 
 func (a RecoveryAddress) TableName(ctx context.Context) string {
-	return corp.ContextualizeTableName(ctx, "identity_recovery_addresses")
+	return "identity_recovery_addresses"
 }
 
 func (a RecoveryAddress) ValidateNID() error {
 	return nil
+}
+
+func (a RecoveryAddress) GetID() uuid.UUID {
+	return a.ID
+}
+
+// Hash returns a unique string representation for the recovery address.
+func (a RecoveryAddress) Hash() string {
+	return fmt.Sprintf("%v|%v|%v|%v", a.Value, a.Via, a.IdentityID, a.NID)
 }
 
 func NewRecoveryEmailAddress(
@@ -64,6 +78,17 @@ func NewRecoveryEmailAddress(
 	return &RecoveryAddress{
 		Value:      value,
 		Via:        RecoveryAddressTypeEmail,
+		IdentityID: identity,
+	}
+}
+
+func NewRecoverySMSAddress(
+	value string,
+	identity uuid.UUID,
+) *RecoveryAddress {
+	return &RecoveryAddress{
+		Value:      value,
+		Via:        RecoveryAddressTypeSMS,
 		IdentityID: identity,
 	}
 }

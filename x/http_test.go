@@ -1,3 +1,6 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package x
 
 import (
@@ -26,6 +29,9 @@ func TestRequestURL(t *testing.T) {
 	assert.EqualValues(t, RequestURL(&http.Request{
 		URL: urlx.ParseOrPanic("/foo"), Host: "foobar",
 	}).String(), "http://foobar/foo")
+	assert.EqualValues(t, RequestURL(&http.Request{
+		URL: urlx.ParseOrPanic("/foo"), Host: "foobar", Header: http.Header{"X-Forwarded-Host": []string{"notfoobar"}, "X-Forwarded-Proto": {"https"}},
+	}).String(), "https://notfoobar/foo")
 }
 
 func TestAcceptToRedirectOrJSON(t *testing.T) {
@@ -37,7 +43,7 @@ func TestAcceptToRedirectOrJSON(t *testing.T) {
 
 		t.Run("regular payload", func(t *testing.T) {
 			w := httptest.NewRecorder()
-			AcceptToRedirectOrJSON(w, r, wr, json.RawMessage(`{"foo":"bar"}`), "https://www.ory.sh/redir")
+			SendFlowCompletedAsRedirectOrJSON(w, r, wr, json.RawMessage(`{"foo":"bar"}`), "https://www.ory.sh/redir")
 			loc, err := w.Result().Location()
 			require.NoError(t, err)
 			assert.Equal(t, "https://www.ory.sh/redir", loc.String())
@@ -45,7 +51,7 @@ func TestAcceptToRedirectOrJSON(t *testing.T) {
 
 		t.Run("error payload", func(t *testing.T) {
 			w := httptest.NewRecorder()
-			AcceptToRedirectOrJSON(w, r, wr, errors.New("foo"), "https://www.ory.sh/redir")
+			SendFlowCompletedAsRedirectOrJSON(w, r, wr, errors.New("foo"), "https://www.ory.sh/redir")
 			loc, err := w.Result().Location()
 			require.NoError(t, err)
 			assert.Equal(t, "https://www.ory.sh/redir", loc.String())
@@ -59,7 +65,7 @@ func TestAcceptToRedirectOrJSON(t *testing.T) {
 		t.Run("regular payload", func(t *testing.T) {
 			msg := json.RawMessage(`{"foo":"bar"}`)
 			w := httptest.NewRecorder()
-			AcceptToRedirectOrJSON(w, r, wr, msg, "https://www.ory.sh/redir")
+			SendFlowCompletedAsRedirectOrJSON(w, r, wr, msg, "https://www.ory.sh/redir")
 			_, err := w.Result().Location()
 			require.ErrorIs(t, err, http.ErrNoLocation)
 
@@ -70,7 +76,7 @@ func TestAcceptToRedirectOrJSON(t *testing.T) {
 		t.Run("error payload", func(t *testing.T) {
 			ee := errors.WithStack(herodot.ErrBadRequest)
 			w := httptest.NewRecorder()
-			AcceptToRedirectOrJSON(w, r, wr, ee, "https://www.ory.sh/redir")
+			SendFlowCompletedAsRedirectOrJSON(w, r, wr, ee, "https://www.ory.sh/redir")
 			_, err := w.Result().Location()
 			require.ErrorIs(t, err, http.ErrNoLocation)
 

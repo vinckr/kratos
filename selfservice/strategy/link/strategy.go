@@ -1,3 +1,6 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package link
 
 import (
@@ -13,16 +16,21 @@ import (
 	"github.com/ory/kratos/ui/container"
 	"github.com/ory/kratos/ui/node"
 	"github.com/ory/kratos/x"
+	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/x/decoderx"
 )
 
-var _ recovery.Strategy = new(Strategy)
-var _ recovery.AdminHandler = new(Strategy)
-var _ recovery.PublicHandler = new(Strategy)
+var (
+	_ recovery.Strategy      = new(Strategy)
+	_ recovery.AdminHandler  = new(Strategy)
+	_ recovery.PublicHandler = new(Strategy)
+)
 
-var _ verification.Strategy = new(Strategy)
-var _ verification.AdminHandler = new(Strategy)
-var _ verification.PublicHandler = new(Strategy)
+var (
+	_ verification.Strategy      = new(Strategy)
+	_ verification.AdminHandler  = new(Strategy)
+	_ verification.PublicHandler = new(Strategy)
+)
 
 type (
 	// FlowMethod contains the configuration for this selfservice strategy.
@@ -31,10 +39,12 @@ type (
 	}
 
 	strategyDependencies interface {
-		x.CSRFProvider
-		x.CSRFTokenGeneratorProvider
+		nosurfx.CSRFProvider
+		nosurfx.CSRFTokenGeneratorProvider
 		x.WriterProvider
 		x.LoggingProvider
+		x.TracingProvider
+		x.TransactionPersistenceProvider
 
 		config.Provider
 
@@ -61,12 +71,13 @@ type (
 		verification.FlowPersistenceProvider
 		verification.StrategyProvider
 		verification.HookExecutorProvider
+		verification.HandlerProvider
 
 		RecoveryTokenPersistenceProvider
 		VerificationTokenPersistenceProvider
 		SenderProvider
 
-		schema.IdentityTraitsProvider
+		schema.IdentitySchemaProvider
 	}
 
 	Strategy struct {
@@ -75,14 +86,10 @@ type (
 	}
 )
 
-func NewStrategy(d strategyDependencies) *Strategy {
-	return &Strategy{d: d, dx: decoderx.NewHTTP()}
+func NewStrategy(d any) *Strategy {
+	return &Strategy{d: d.(strategyDependencies), dx: decoderx.NewHTTP()}
 }
 
-func (s *Strategy) RecoveryNodeGroup() node.UiNodeGroup {
-	return node.LinkGroup
-}
-
-func (s *Strategy) VerificationNodeGroup() node.UiNodeGroup {
+func (s *Strategy) NodeGroup() node.UiNodeGroup {
 	return node.LinkGroup
 }

@@ -1,3 +1,6 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package driver
 
 import (
@@ -15,32 +18,22 @@ func (m *RegistryDefault) LoginHookExecutor() *login.HookExecutor {
 	return m.selfserviceLoginExecutor
 }
 
-func (m *RegistryDefault) PreLoginHooks(ctx context.Context) (b []login.PreHookExecutor) {
-	for _, v := range m.getHooks("", m.Config(ctx).SelfServiceFlowLoginBeforeHooks()) {
-		if hook, ok := v.(login.PreHookExecutor); ok {
-			b = append(b, hook)
-		}
-	}
-	return
+func (m *RegistryDefault) PreLoginHooks(ctx context.Context) ([]login.PreHookExecutor, error) {
+	return getHooks[login.PreHookExecutor](m, "", m.Config().SelfServiceFlowLoginBeforeHooks(ctx))
 }
 
-func (m *RegistryDefault) PostLoginHooks(ctx context.Context, credentialsType identity.CredentialsType) (b []login.PostHookExecutor) {
-	for _, v := range m.getHooks(string(credentialsType), m.Config(ctx).SelfServiceFlowLoginAfterHooks(string(credentialsType))) {
-		if hook, ok := v.(login.PostHookExecutor); ok {
-			b = append(b, hook)
-		}
+func (m *RegistryDefault) PostLoginHooks(ctx context.Context, credentialsType identity.CredentialsType) ([]login.PostHookExecutor, error) {
+	hooks, err := getHooks[login.PostHookExecutor](m, string(credentialsType), m.Config().SelfServiceFlowLoginAfterHooks(ctx, string(credentialsType)))
+	if err != nil {
+		return nil, err
+	}
+	if len(hooks) > 0 {
+		return hooks, nil
 	}
 
-	if len(b) == 0 {
-		// since we don't want merging hooks defined in a specific strategy and global hooks
-		// global hooks are added only if no strategy specific hooks are defined
-		for _, v := range m.getHooks(config.HookGlobal, m.Config(ctx).SelfServiceFlowLoginAfterHooks("global")) {
-			if hook, ok := v.(login.PostHookExecutor); ok {
-				b = append(b, hook)
-			}
-		}
-	}
-	return
+	// since we don't want merging hooks defined in a specific strategy and global hooks
+	// global hooks are added only if no strategy specific hooks are defined
+	return getHooks[login.PostHookExecutor](m, config.HookGlobal, m.Config().SelfServiceFlowLoginAfterHooks(ctx, config.HookGlobal))
 }
 
 func (m *RegistryDefault) LoginHandler() *login.Handler {

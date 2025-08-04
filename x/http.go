@@ -1,13 +1,12 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package x
 
 import (
 	"context"
-	"io"
-	"io/ioutil"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
-	"testing"
 
 	"github.com/ory/x/httpx"
 
@@ -17,52 +16,17 @@ import (
 
 	"github.com/ory/herodot"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/ory/x/stringsx"
 )
 
-func NewTestHTTPRequest(t *testing.T, method, url string, body io.Reader) *http.Request {
-	req, err := http.NewRequest(method, url, body)
-	require.NoError(t, err)
-	return req
-}
-
-func EasyGet(t *testing.T, c *http.Client, url string) (*http.Response, []byte) {
-	res, err := c.Get(url)
-	require.NoError(t, err)
-	defer res.Body.Close()
-	body, err := ioutil.ReadAll(res.Body)
-	require.NoError(t, err)
-	return res, body
-}
-
-func EasyGetJSON(t *testing.T, c *http.Client, url string) (*http.Response, []byte) {
-	req, err := http.NewRequest("GET", url, nil)
-	require.NoError(t, err)
-	req.Header.Set("Accept", "application/json")
-	res, err := c.Do(req)
-	require.NoError(t, err)
-	defer res.Body.Close()
-	body, err := ioutil.ReadAll(res.Body)
-	require.NoError(t, err)
-	return res, body
-}
-
-func EasyGetBody(t *testing.T, c *http.Client, url string) []byte {
-	_, body := EasyGet(t, c, url) // nolint: bodyclose
-	return body
-}
-
-func EasyCookieJar(t *testing.T, o *cookiejar.Options) *cookiejar.Jar {
-	cj, err := cookiejar.New(o)
-	require.NoError(t, err)
-	return cj
-}
-
 func RequestURL(r *http.Request) *url.URL {
 	source := *r.URL
-	source.Host = stringsx.Coalesce(source.Host, r.Host)
+	source.Host = stringsx.Coalesce(source.Host, r.Header.Get("X-Forwarded-Host"), r.Host)
+
+	if proto := r.Header.Get("X-Forwarded-Proto"); len(proto) > 0 {
+		source.Scheme = proto
+	}
+
 	if source.Scheme == "" {
 		source.Scheme = "https"
 		if r.TLS == nil {
@@ -73,44 +37,26 @@ func RequestURL(r *http.Request) *url.URL {
 	return &source
 }
 
-func NewTransportWithHeader(h http.Header) *TransportWithHeader {
-	return &TransportWithHeader{
-		RoundTripper: http.DefaultTransport,
-		h:            h,
-	}
-}
-
-type TransportWithHeader struct {
-	http.RoundTripper
-	h http.Header
-}
-
-func (ct *TransportWithHeader) RoundTrip(req *http.Request) (*http.Response, error) {
-	for k := range ct.h {
-		req.Header.Set(k, ct.h.Get(k))
-	}
-	return ct.RoundTripper.RoundTrip(req)
-}
-
-func NewTransportWithHost(host string) *TransportWithHost {
-	return &TransportWithHost{
-		RoundTripper: http.DefaultTransport,
-		host:         host,
-	}
-}
-
-type TransportWithHost struct {
-	http.RoundTripper
-	host string
-}
-
-func (ct *TransportWithHost) RoundTrip(req *http.Request) (*http.Response, error) {
-	req.Host = ct.host
-	return ct.RoundTripper.RoundTrip(req)
-}
-
-func AcceptToRedirectOrJSON(
+// SendFlowCompletedAsRedirectOrJSON should be used when a login, registration, ... flow has been completed successfully.
+// It will redirect the user to the provided URL if the request accepts HTML, or return a JSON response if the request is
+// an SPA request
+func SendFlowCompletedAsRedirectOrJSON(
 	w http.ResponseWriter, r *http.Request, writer herodot.Writer, out interface{}, redirectTo string,
+) {
+	sendFlowAsRedirectOrJSON(w, r, writer, out, redirectTo, http.StatusOK)
+}
+
+// SendFlowErrorAsRedirectOrJSON should be used when a login, registration, ... flow has errors (e.g. validation errors
+// or missing data) and should be redirected to the provided URL if the request accepts HTML, or return a JSON response
+// if the request is an SPA request.
+func SendFlowErrorAsRedirectOrJSON(
+	w http.ResponseWriter, r *http.Request, writer herodot.Writer, out interface{}, redirectTo string,
+) {
+	sendFlowAsRedirectOrJSON(w, r, writer, out, redirectTo, http.StatusBadRequest)
+}
+
+func sendFlowAsRedirectOrJSON(
+	w http.ResponseWriter, r *http.Request, writer herodot.Writer, out interface{}, redirectTo string, jsonResponseCode int,
 ) {
 	switch httputil.NegotiateContentType(r, []string{
 		"text/html",
@@ -122,7 +68,7 @@ func AcceptToRedirectOrJSON(
 			return
 		}
 
-		writer.Write(w, r, out)
+		writer.WriteCode(w, r, jsonResponseCode, out)
 	case "text/html":
 		fallthrough
 	default:
@@ -138,5 +84,5 @@ func AcceptsJSON(r *http.Request) bool {
 }
 
 type HTTPClientProvider interface {
-	HTTPClient(ctx context.Context, opts ...httpx.ResilientOptions) *retryablehttp.Client
+	HTTPClient(context.Context, ...httpx.ResilientOptions) *retryablehttp.Client
 }

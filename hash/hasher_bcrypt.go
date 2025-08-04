@@ -1,7 +1,17 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package hash
 
 import (
 	"context"
+	"fmt"
+
+	"github.com/ory/kratos/text"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ory/kratos/schema"
 
@@ -23,11 +33,24 @@ func NewHasherBcrypt(c BcryptConfiguration) *Bcrypt {
 }
 
 func (h *Bcrypt) Generate(ctx context.Context, password []byte) ([]byte, error) {
+	conf := h.c.Config().HasherBcrypt(ctx)
+
+	_, span := otel.GetTracerProvider().Tracer(tracingComponent).Start(ctx, "hash.Generate", trace.WithAttributes(
+		attribute.String("hash.type", "bcrypt"),
+		attribute.String("hash.config", fmt.Sprintf("%#v", conf)),
+	))
+	defer span.End()
+
 	if err := validateBcryptPasswordLength(password); err != nil {
 		return nil, err
 	}
 
-	hash, err := bcrypt.GenerateFromPassword(password, int(h.c.Config(ctx).HasherBcrypt().Cost))
+	// ensure that the context is not canceled before doing the heavy lifting
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	hash, err := bcrypt.GenerateFromPassword(password, int(conf.Cost))
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +65,7 @@ func validateBcryptPasswordLength(password []byte) error {
 	if len(password) > 72 {
 		return schema.NewPasswordPolicyViolationError(
 			"#/password",
-			"passwords are limited to a maximum length of 72 characters",
+			text.NewErrorValidationPasswordMaxLength(72, len(password)),
 		)
 	}
 	return nil

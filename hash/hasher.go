@@ -1,6 +1,11 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package hash
 
-import "context"
+import (
+	"context"
+)
 
 // Hasher provides methods for generating and comparing password hashes.
 type Hasher interface {
@@ -12,5 +17,7 @@ type Hasher interface {
 }
 
 type HashProvider interface {
-	Hasher() Hasher
+	Hasher(ctx context.Context) Hasher
 }
+
+const tracingComponent = "github.com/ory/kratos/hash"

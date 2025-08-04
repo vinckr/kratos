@@ -1,3 +1,6 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package testhelpers
 
 import (
@@ -7,25 +10,28 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/ory/kratos/corp"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ory/kratos/driver"
-	"github.com/ory/x/dbal"
+	"github.com/ory/x/jsonnetsecure"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ory/x/tlsx"
 
-	"github.com/avast/retry-go/v3"
 	"github.com/phayes/freeport"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
@@ -36,14 +42,7 @@ import (
 	"github.com/ory/x/configx"
 )
 
-type ConfigOptions map[string]interface{}
-
-func init() {
-	corp.SetContextualizer(new(corp.ContextNoOp))
-	dbal.RegisterDriver(func() dbal.Driver {
-		return driver.NewRegistryDefault()
-	})
-}
+type ConfigOptions = map[string]interface{}
 
 func StartE2EServerOnly(t *testing.T, configFile string, isTLS bool, configOptions ConfigOptions) (publicPort, adminPort int) {
 	return startE2EServerOnly(t, configFile, isTLS, configOptions, 0)
@@ -64,29 +63,29 @@ func startE2EServerOnly(t *testing.T, configFile string, isTLS bool, configOptio
 		adminUrl = fmt.Sprintf("https://127.0.0.1:%d", adminPort)
 	}
 
-	dbt, err := os.MkdirTemp(os.TempDir(), "ory-kratos-e2e-examples-*")
-	require.NoError(t, err)
-	dsn := "sqlite://" + filepath.Join(dbt, "db.sqlite") + "?_fk=true&mode=rwc"
+	dsn := "sqlite://" + filepath.Join(t.TempDir(), "db.sqlite") + "?_fk=true&mode=rwc"
 
-	ctx := configx.ContextWithConfigOptions(
-		context.Background(),
-		configx.WithValue("dsn", dsn),
-		configx.WithValue("dev", true),
-		configx.WithValue("log.level", "error"),
-		configx.WithValue("log.leak_sensitive_values", true),
-		configx.WithValue("serve.public.port", publicPort),
-		configx.WithValue("serve.admin.port", adminPort),
-		configx.WithValue("serve.public.base_url", publicUrl),
-		configx.WithValue("serve.admin.base_url", adminUrl),
-		configx.WithValues(configOptions),
-	)
+	ctx := t.Context()
+	defaultConfig := map[string]any{
+		"dsn":                       dsn,
+		"dev":                       true,
+		"log.level":                 "error",
+		"log.leak_sensitive_values": true,
+		"serve.public.port":         publicPort,
+		"serve.admin.port":          adminPort,
+		"serve.public.base_url":     publicUrl,
+		"serve.admin.base_url":      adminUrl,
+	}
+
+	jsonnetPool := jsonnetsecure.NewProcessPool(runtime.GOMAXPROCS(0))
+	t.Cleanup(jsonnetPool.Close)
 
 	//nolint:staticcheck
-	ctx = context.WithValue(ctx, "dsn", dsn)
+	//lint:ignore SA1029 we really want this
 	ctx, cancel := context.WithCancel(ctx)
 	executor := &cmdx.CommandExecuter{
 		New: func() *cobra.Command {
-			return cmd.NewRootCmd()
+			return cmd.NewRootCmd(driver.WithJsonnetPool(jsonnetPool), driver.WithConfigOptions(configx.WithValues(defaultConfig), configx.WithValues(configOptions)))
 		},
 		Ctx: ctx,
 	}
@@ -101,7 +100,7 @@ func startE2EServerOnly(t *testing.T, configFile string, isTLS bool, configOptio
 
 	err = waitTimeout(t, eg, time.Second)
 	if err != nil && tries < 5 {
-		if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "address already in use") {
+		if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "address already in use") || strings.Contains(stdErr.String(), "address already in use") {
 			t.Logf("Detected an instance with port reuse, retrying #%d...", tries)
 			time.Sleep(time.Millisecond * 500)
 			cancel()
@@ -143,8 +142,8 @@ func CheckE2EServerOnHTTP(t *testing.T, publicPort, adminPort int) (publicUrl, a
 }
 
 func waitToComeAlive(t *testing.T, publicUrl, adminUrl string) {
-	require.NoError(t, retry.Do(func() error {
-		/* #nosec G402: TLS InsecureSkipVerify set true. */
+	require.EventuallyWithT(t, func(t *assert.CollectT) {
+		//#nosec G402 -- TLS InsecureSkipVerify set true
 		tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 		client := &http.Client{Transport: tr}
 
@@ -155,25 +154,14 @@ func waitToComeAlive(t *testing.T, publicUrl, adminUrl string) {
 			adminUrl + "/health/alive",
 		} {
 			res, err := client.Get(url)
-			if err != nil {
-				return err
-			}
+			require.NoError(t, err)
 
 			body := x.MustReadAll(res.Body)
-			if err := res.Body.Close(); err != nil {
-				return err
-			}
-			t.Logf("%s", body)
+			_ = res.Body.Close()
 
-			if res.StatusCode != http.StatusOK {
-				return fmt.Errorf("expected status code 200 but got: %d", res.StatusCode)
-			}
+			require.Equalf(t, http.StatusOK, res.StatusCode, "%s", body)
 		}
-		return nil
-	},
-		retry.MaxDelay(time.Second),
-		retry.Attempts(60)),
-	)
+	}, 10*time.Second, time.Second)
 }
 
 func CheckE2EServerOnHTTPS(t *testing.T, publicPort, adminPort int) (publicUrl, adminUrl string) {
@@ -183,35 +171,55 @@ func CheckE2EServerOnHTTPS(t *testing.T, publicPort, adminPort int) (publicUrl, 
 	return
 }
 
-func GenerateTLSCertificateFilesForTests(t *testing.T, certPath, keyPath string) {
+// GenerateTLSCertificateFilesForTests writes a new, self-signed TLS
+// certificate+key (in PEM format) to a temporary location on disk and returns
+// the paths to both, as well as the respective contents in base64 encoding. The
+// files are automatically cleaned up when the given *testing.T concludes its
+// tests.
+func GenerateTLSCertificateFilesForTests(t *testing.T) (certPath, keyPath, certBase64, keyBase64 string) {
+	tmpDir := t.TempDir()
+
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
 	cert, err := tlsx.CreateSelfSignedCertificate(privateKey)
 	require.NoError(t, err)
 
-	certOut, err := os.Create(certPath)
-	require.NoError(t, err, "Failed to open cert.pem for writing: %v", err)
+	// write cert
+	certFile, err := os.CreateTemp(tmpDir, "test-*-cert.pem")
+	require.NoError(t, err, "Failed to create temp file for certificate: %v", err)
+	certPath = certFile.Name()
 
+	var buf bytes.Buffer
+	enc := base64.NewEncoder(base64.StdEncoding, &buf)
+	certOut := io.MultiWriter(enc, certFile)
 	err = pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
-	require.NoError(t, err, "Failed to write data to cert.pem: %v", err)
+	require.NoError(t, err, "Failed to write data to %q: %v", certPath, err)
+	err = enc.Close()
+	require.NoError(t, err, "Error closing base64 encoder")
+	err = certFile.Close()
+	require.NoError(t, err, "Error closing %q: %v", certPath, err)
+	certBase64 = buf.String()
+	t.Log("wrote", certPath)
 
-	err = certOut.Close()
-	require.NoError(t, err, "Error closing cert.pem: %v", err)
-
-	t.Logf("wrote cert.pem")
-
-	keyOut, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	require.NoError(t, err, "Failed to open key.pem for writing: %v", err)
+	// write key
+	keyFile, err := os.CreateTemp(tmpDir, "test-*-key.pem")
+	require.NoError(t, err, "Failed to create temp file for key: %v", err)
+	keyPath = keyFile.Name()
+	buf.Reset()
+	enc = base64.NewEncoder(base64.StdEncoding, &buf)
+	keyOut := io.MultiWriter(enc, keyFile)
 
 	privBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
-	require.NoError(t, err, "Unable to marshal private key: %v", err)
+	require.NoError(t, err, "Failed to marshal private key: %v", err)
 
 	err = pem.Encode(keyOut, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
-	require.NoError(t, err, "Failed to write data to key.pem: %v", err)
-
-	err = keyOut.Close()
-	require.NoError(t, err, "Error closing key.pem: %v", err)
-
-	t.Logf("wrote key.pem")
+	require.NoError(t, err, "Failed to write data to %q: %v", keyPath, err)
+	err = enc.Close()
+	require.NoError(t, err, "Error closing base64 encoder")
+	err = keyFile.Close()
+	require.NoError(t, err, "Error closing %q: %v", keyPath, err)
+	keyBase64 = buf.String()
+	t.Log("wrote", keyPath)
+	return
 }

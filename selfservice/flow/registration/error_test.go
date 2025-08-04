@@ -1,12 +1,17 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package registration_test
 
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/ory/kratos/driver/config"
 
@@ -15,7 +20,7 @@ import (
 	"github.com/ory/kratos/ui/node"
 
 	"github.com/gobuffalo/httptest"
-	"github.com/julienschmidt/httprouter"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -35,14 +40,15 @@ import (
 )
 
 func TestHandleError(t *testing.T) {
+	ctx := context.Background()
 	conf, reg := internal.NewFastRegistryWithMocks(t)
 
-	conf.MustSet(config.ViperKeySelfServiceRegistrationEnabled, true)
+	conf.MustSet(ctx, config.ViperKeySelfServiceRegistrationEnabled, true)
 	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/login.schema.json")
 
 	public, _ := testhelpers.NewKratosServer(t, reg)
 
-	router := httprouter.New()
+	router := http.NewServeMux()
 	ts := httptest.NewServer(router)
 	t.Cleanup(ts.Close)
 
@@ -55,7 +61,7 @@ func TestHandleError(t *testing.T) {
 	var registrationFlow *registration.Flow
 	var flowError error
 	var group node.UiNodeGroup
-	router.GET("/error", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	router.HandleFunc("GET /error", func(w http.ResponseWriter, r *http.Request) {
 		h.WriteFlowError(w, r, registrationFlow, group, flowError)
 	})
 
@@ -70,7 +76,21 @@ func TestHandleError(t *testing.T) {
 		f, err := registration.NewFlow(conf, ttl, "csrf_token", req, ft)
 		require.NoError(t, err)
 		for _, s := range reg.RegistrationStrategies(context.Background()) {
-			require.NoError(t, s.PopulateRegistrationMethod(req, f))
+			var populateErr error
+			switch strategy := s.(type) {
+			case registration.FormHydrator:
+				switch {
+				case conf.SelfServiceFlowRegistrationTwoSteps(ctx):
+					populateErr = strategy.PopulateRegistrationMethodProfile(req, f)
+				default:
+					populateErr = strategy.PopulateRegistrationMethod(req, f)
+				}
+			case registration.UnifiedFormHydrator:
+				populateErr = strategy.PopulateRegistrationMethod(req, f)
+			default:
+				populateErr = errors.WithStack(x.PseudoPanic.WithReasonf("A registration strategy was expected to implement one of the interfaces UnifiedFormHydrator or FormHydrator but did not."))
+			}
+			require.NoError(t, populateErr)
 		}
 
 		require.NoError(t, reg.RegistrationFlowPersister().CreateRegistrationFlow(context.Background(), f))
@@ -81,9 +101,9 @@ func TestHandleError(t *testing.T) {
 		res, err := ts.Client().Get(ts.URL + "/error")
 		require.NoError(t, err)
 		defer res.Body.Close()
-		require.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL().String()+"?id=")
+		require.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL(ctx).String()+"?id=")
 
-		sse, _, err := sdk.V0alpha2Api.GetSelfServiceError(context.Background()).Id(res.Request.URL.Query().Get("id")).Execute()
+		sse, _, err := sdk.FrontendAPI.GetFlowError(context.Background()).Id(res.Request.URL.Query().Get("id")).Execute()
 		require.NoError(t, err)
 
 		return sse.Error, nil
@@ -111,9 +131,9 @@ func TestHandleError(t *testing.T) {
 		require.NoError(t, err)
 		defer res.Body.Close()
 		assert.Contains(t, res.Header.Get("Content-Type"), "application/json")
-		assert.NotContains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL().String()+"?id=")
+		assert.NotContains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL(ctx).String()+"?id=")
 
-		body, err := ioutil.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
 		require.NoError(t, err)
 		assert.Contains(t, string(body), "system error")
 	})
@@ -137,7 +157,7 @@ func TestHandleError(t *testing.T) {
 				require.NoError(t, err)
 				defer res.Body.Close()
 
-				body, err := ioutil.ReadAll(res.Body)
+				body, err := io.ReadAll(res.Body)
 				require.NoError(t, err)
 				require.Equal(t, http.StatusGone, res.StatusCode, "%+v\n\t%s", res.Request, body)
 
@@ -157,7 +177,7 @@ func TestHandleError(t *testing.T) {
 				defer res.Body.Close()
 				require.Equal(t, http.StatusBadRequest, res.StatusCode)
 
-				body, err := ioutil.ReadAll(res.Body)
+				body, err := io.ReadAll(res.Body)
 				require.NoError(t, err)
 				assert.Equal(t, int(text.ErrorValidationInvalidCredentials), int(gjson.GetBytes(body, "ui.messages.0.id").Int()), "%s", body)
 				assert.Equal(t, registrationFlow.ID.String(), gjson.GetBytes(body, "id").String())
@@ -175,7 +195,7 @@ func TestHandleError(t *testing.T) {
 				defer res.Body.Close()
 				require.Equal(t, http.StatusInternalServerError, res.StatusCode)
 
-				body, err := ioutil.ReadAll(res.Body)
+				body, err := io.ReadAll(res.Body)
 				require.NoError(t, err)
 				assert.JSONEq(t, x.MustEncodeJSON(t, flowError), gjson.GetBytes(body, "error").Raw)
 			})
@@ -187,7 +207,7 @@ func TestHandleError(t *testing.T) {
 			res, err := ts.Client().Get(ts.URL + "/error")
 			require.NoError(t, err)
 			defer res.Body.Close()
-			assert.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowRegistrationUI().String()+"?flow=")
+			assert.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowRegistrationUI(ctx).String()+"?flow=")
 
 			rf, err := reg.RegistrationFlowPersister().GetRegistrationFlow(context.Background(), uuid.FromStringOrNil(res.Request.URL.Query().Get("flow")))
 			require.NoError(t, err)

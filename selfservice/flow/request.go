@@ -1,3 +1,6 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package flow
 
 import (
@@ -6,6 +9,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ory/kratos/x/nosurfx"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/selfservice/strategy"
 	"github.com/ory/x/decoderx"
@@ -13,7 +21,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/ory/herodot"
-	"github.com/ory/kratos/x"
 	"github.com/ory/nosurf"
 )
 
@@ -22,12 +29,12 @@ var methodSchema []byte
 
 var ErrOriginHeaderNeedsBrowserFlow = herodot.ErrBadRequest.
 	WithReasonf(`The HTTP Request Header included the "Origin" key, indicating that this request was made as part of an AJAX request in a Browser. The flow however was initiated as an API request. To prevent potential misuse and mitigate several attack vectors including CSRF, the request has been blocked. Please consult the documentation.`)
+
 var ErrCookieHeaderNeedsBrowserFlow = herodot.ErrBadRequest.
 	WithReasonf(`The HTTP Request Header included the "Cookie" key, indicating that this request was made by a Browser. The flow however was initiated as an API request. To prevent potential misuse and mitigate several attack vectors including CSRF, the request has been blocked. Please consult the documentation.`)
 
-func EnsureCSRF(reg interface {
-	config.Provider
-},
+func EnsureCSRF(
+	reg config.Provider,
 	r *http.Request,
 	flowType Type,
 	disableAPIFlowEnforcement bool,
@@ -49,22 +56,22 @@ func EnsureCSRF(reg interface {
 		}
 
 		// Workaround for Cloudflare setting cookies that we can't control.
-		var hasCookie bool
+		// https://developers.cloudflare.com/fundamentals/reference/policies-compliances/cloudflare-cookies/
+		var cookies []string
 		for _, c := range r.Cookies() {
-			if !strings.HasPrefix(c.Name, "__cf") {
-				hasCookie = true
-				break
+			if !(strings.HasPrefix(c.Name, "__cf") || strings.HasPrefix(c.Name, "_cf") || strings.HasPrefix(c.Name, "cf_")) {
+				cookies = append(cookies, c.Name)
 			}
 		}
 
-		if hasCookie {
-			return errors.WithStack(ErrCookieHeaderNeedsBrowserFlow)
+		if len(cookies) > 0 {
+			return errors.WithStack(ErrCookieHeaderNeedsBrowserFlow.WithDetail("found cookies", cookies))
 		}
 
 		return nil
 	default:
 		if !nosurf.VerifyToken(generator(r), actual) {
-			return errors.WithStack(x.CSRFErrorReason(r, reg))
+			return errors.WithStack(nosurfx.CSRFErrorReason(r, reg))
 		}
 	}
 
@@ -73,9 +80,10 @@ func EnsureCSRF(reg interface {
 
 var dec = decoderx.NewHTTP()
 
-func MethodEnabledAndAllowedFromRequest(r *http.Request, expected string, d interface {
+func MethodEnabledAndAllowedFromRequest(r *http.Request, flow FlowName, expected string, d interface {
 	config.Provider
-}) error {
+},
+) error {
 	var method struct {
 		Method string `json:"method" form:"method"`
 	}
@@ -93,17 +101,16 @@ func MethodEnabledAndAllowedFromRequest(r *http.Request, expected string, d inte
 		return errors.WithStack(err)
 	}
 
-	return MethodEnabledAndAllowed(r.Context(), expected, method.Method, d)
+	return MethodEnabledAndAllowed(r.Context(), flow, expected, method.Method, d)
 }
 
-func MethodEnabledAndAllowed(ctx context.Context, expected, actual string, d interface {
-	config.Provider
-}) error {
+func MethodEnabledAndAllowed(ctx context.Context, _ FlowName, expected, actual string, d config.Provider) error {
 	if actual != expected {
+		trace.SpanFromContext(ctx).SetAttributes(attribute.String("not_responsible_reason", "method mismatch"))
 		return errors.WithStack(ErrStrategyNotResponsible)
 	}
 
-	if !d.Config(ctx).SelfServiceStrategy(expected).Enabled {
+	if !d.Config().SelfServiceStrategy(ctx, expected).Enabled {
 		return errors.WithStack(herodot.ErrNotFound.WithReason(strategy.EndpointDisabledMessage))
 	}
 

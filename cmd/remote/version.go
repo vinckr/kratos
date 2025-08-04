@@ -1,3 +1,6 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package remote
 
 import (
@@ -29,8 +32,11 @@ var versionCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := cliclient.NewClient(cmd)
+		if err != nil {
+			return err
+		}
 
-		resp, _, err := c.MetadataApi.GetVersion(cmd.Context()).Execute()
+		resp, _, err := c.MetadataAPI.GetVersion(cmd.Context()).Execute()
 		if err != nil {
 			return err
 		}

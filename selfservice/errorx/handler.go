@@ -1,14 +1,18 @@
+// Copyright © 2023 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package errorx
 
 import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/ory/kratos/x/nosurfx"
+	"github.com/ory/kratos/x/redir"
+
 	"github.com/ory/x/stringsx"
 
 	"github.com/ory/kratos/driver/config"
-
-	"github.com/julienschmidt/httprouter"
 
 	"github.com/ory/herodot"
 	"github.com/ory/kratos/x"
@@ -30,7 +34,7 @@ type (
 	}
 	Handler struct {
 		r    handlerDependencies
-		csrf x.CSRFToken
+		csrf nosurfx.CSRFToken
 	}
 )
 
@@ -49,12 +53,14 @@ func (h *Handler) RegisterPublicRoutes(public *x.RouterPublic) {
 }
 
 func (h *Handler) RegisterAdminRoutes(public *x.RouterAdmin) {
-	public.GET(RouteGet, x.RedirectToPublicRoute(h.r))
+	public.GET(RouteGet, redir.RedirectToPublicRoute(h.r))
 }
 
-// nolint:deadcode,unused
-// swagger:parameters getSelfServiceError
-type getSelfServiceError struct {
+// swagger:parameters getFlowError
+//
+//nolint:deadcode,unused
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
+type getFlowError struct {
 	// Error is the error's ID
 	//
 	// in: query
@@ -62,9 +68,9 @@ type getSelfServiceError struct {
 	ID string `json:"id"`
 }
 
-// swagger:route GET /self-service/errors v0alpha2 getSelfServiceError
+// swagger:route GET /self-service/errors frontend getFlowError
 //
-// Get Self-Service Errors
+// # Get User-Flow Errors
 //
 // This endpoint returns the error associated with a user-facing self service errors.
 //
@@ -74,17 +80,17 @@ type getSelfServiceError struct {
 //
 // More information can be found at [Ory Kratos User User Facing Error Documentation](https://www.ory.sh/docs/kratos/self-service/flows/user-facing-errors).
 //
-//     Produces:
-//     - application/json
+//	Produces:
+//	- application/json
 //
-//     Schemes: http, https
+//	Schemes: http, https
 //
-//     Responses:
-//       200: selfServiceError
-//       403: jsonError
-//       404: jsonError
-//       500: jsonError
-func (h *Handler) publicFetchError(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+//	Responses:
+//	  200: flowError
+//	  403: errorGeneric
+//	  404: errorGeneric
+//	  500: errorGeneric
+func (h *Handler) publicFetchError(w http.ResponseWriter, r *http.Request) {
 	if err := h.fetchError(w, r); err != nil {
 		h.r.Writer().WriteError(w, r, err)
 		return
@@ -102,7 +108,7 @@ func (h *Handler) fetchError(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 
-	es, err := h.r.SelfServiceErrorPersister().Read(r.Context(), x.ParseUUID(id))
+	es, err := h.r.SelfServiceErrorPersister().ReadErrorContainer(r.Context(), x.ParseUUID(id))
 	if err != nil {
 		return err
 	}
